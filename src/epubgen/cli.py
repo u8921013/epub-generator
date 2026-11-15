@@ -20,6 +20,14 @@ def build_parser() -> argparse.ArgumentParser:
         description="把圖片資料夾轉成 fixed layout 的漫畫 EPUB。",
     )
     parser.add_argument("input", help="放滿圖片的資料夾")
+    parser.add_argument(
+        "-o", "--output", metavar="PATH",
+        help="輸出檔路徑（預設：輸入資料夾旁邊的 <資料夾名稱>.epub）",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="輸出檔已存在時覆蓋它（預設：拒絕覆蓋）",
+    )
     parser.add_argument("--version", action="version", version=f"epubgen {_version()}")
     return parser
 
@@ -27,7 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        result = build_epub(args.input)
+        result = build_epub(args.input, output=args.output, force=args.force)
     except EpubgenError as exc:
         print(f"epubgen: 錯誤：{exc}", file=sys.stderr)
         return 1
