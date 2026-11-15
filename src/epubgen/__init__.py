@@ -5,10 +5,10 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from .epub import DIRECTIONS, BookSpec, write_epub
+from .epub import DIRECTIONS, BookSpec, TocEntry, write_epub
 from .errors import BrokenImageError, EpubgenError
 from .images import load_image
-from .scan import scan_pages
+from .scan import Book, scan_book
 
 DEFAULT_LANGUAGE = "zh-TW"
 
@@ -48,23 +48,28 @@ def build_epub(
     destination = Path(output) if output else folder.parent / f"{title}.epub"
     _check_destination(destination, force)
 
-    sources = scan_pages(folder)
-    if not sources:
+    scanned = scan_book(folder)
+    if not scanned.pages:
         raise EpubgenError(f"資料夾裡沒有可用的圖片：{input_dir}")
-    pages, skipped = _load_pages(folder, sources, skip_broken)
+    pages, toc, skipped = _load_pages(folder, scanned, skip_broken)
     if not pages:
         names = "".join(f"\n  - {n}" for n in skipped)
         raise EpubgenError(f"所有圖片都無法讀取，沒有可用的圖片：{names}")
 
     book = BookSpec(title=title, language=DEFAULT_LANGUAGE, pages=pages,
-                    direction=direction, spread=spread)
+                    direction=direction, spread=spread, chapters=tuple(toc))
     _write_atomically(book, destination, force)
     return BuildResult(output=destination, page_count=len(pages), skipped=tuple(skipped))
 
 
-def _load_pages(folder: Path, sources: list[Path], skip_broken: bool):
-    pages, skipped = [], []
-    for source in sources:
+def _load_pages(folder: Path, scanned: Book, skip_broken: bool):
+    """讀取所有圖片，回傳 (頁面, 目錄項目, 被跳過的檔名)。
+
+    章節的目錄項目指向該章第一張讀得出來的圖片；整章都讀不出來就不產生項目。
+    """
+    pages, toc, skipped = [], [], []
+
+    def load(source: Path) -> bool:
         name = source.relative_to(folder).as_posix()
         try:
             pages.append(load_image(source, name))
@@ -72,7 +77,16 @@ def _load_pages(folder: Path, sources: list[Path], skip_broken: bool):
             if not skip_broken:
                 raise EpubgenError(f"{exc}（要跳過損毀的圖片請加上 --skip-broken）") from exc
             skipped.append(name)
-    return pages, skipped
+            return False
+        return True
+
+    for source in scanned.front_pages:
+        load(source)
+    for chapter in scanned.chapters:
+        first_page = len(pages) + 1
+        if sum(load(source) for source in chapter.pages):
+            toc.append(TocEntry(chapter.title, first_page))
+    return pages, toc, skipped
 
 
 def _check_destination(destination: Path, force: bool) -> None:

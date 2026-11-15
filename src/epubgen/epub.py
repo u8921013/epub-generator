@@ -23,12 +23,19 @@ DIRECTIONS = ("rtl", "ltr")
 
 
 @dataclass(frozen=True)
+class TocEntry:
+    title: str
+    page: int  # 目標頁面，從 1 起算
+
+
+@dataclass(frozen=True)
 class BookSpec:
     title: str
     language: str
     pages: list[PageImage]
     direction: str = "rtl"  # 翻頁方向，"rtl" 或 "ltr"
     spread: bool = False  # 是否啟用雙頁模式
+    chapters: tuple[TocEntry, ...] = ()  # 空的話，目錄只有一個指向第一頁的項目
 
 
 def _spread_property(index: int, direction: str) -> str:
@@ -62,7 +69,13 @@ def _page_xhtml(index: int, page: PageImage, title: str) -> str:
     )
 
 
-def _nav_xhtml(title: str, language: str) -> str:
+def _nav_xhtml(book: BookSpec) -> str:
+    title, language = book.title, book.language
+    entries = book.chapters or (TocEntry(title, 1),)
+    items = "".join(
+        f'      <li><a href="pages/page-{e.page:04d}.xhtml">{escape(e.title)}</a></li>\n'
+        for e in entries
+    )
     return (
         XML_DECL
         + '<!DOCTYPE html>\n'
@@ -71,7 +84,7 @@ def _nav_xhtml(title: str, language: str) -> str:
         + f"<head>\n  <meta charset=\"utf-8\"/>\n  <title>{escape(title)}</title>\n</head>\n"
         + "<body>\n"
         + '  <nav epub:type="toc" id="toc">\n'
-        + f'    <ol>\n      <li><a href="pages/page-0001.xhtml">{escape(title)}</a></li>\n    </ol>\n'
+        + f"    <ol>\n{items}    </ol>\n"
         + "  </nav>\n"
         + "</body>\n"
         + "</html>\n"
@@ -120,7 +133,7 @@ def write_epub(book: BookSpec, destination: Path) -> None:
         z.writestr("META-INF/container.xml", CONTAINER_XML, compress_type=zipfile.ZIP_DEFLATED)
         z.writestr("OEBPS/content.opf", _package_opf(book, identifier, modified),
                    compress_type=zipfile.ZIP_DEFLATED)
-        z.writestr("OEBPS/nav.xhtml", _nav_xhtml(book.title, book.language),
+        z.writestr("OEBPS/nav.xhtml", _nav_xhtml(book),
                    compress_type=zipfile.ZIP_DEFLATED)
         for i, page in enumerate(book.pages, start=1):
             z.writestr(f"OEBPS/pages/page-{i:04d}.xhtml", _page_xhtml(i, page, book.title),
