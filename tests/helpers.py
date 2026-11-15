@@ -1,0 +1,105 @@
+"""測試用的小工具：即時產生圖片，並把輸出的 EPUB 當 zip 解開觀察。"""
+
+import io
+import re
+import zipfile
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+from PIL import Image
+
+NS = {
+    "c": "urn:oasis:names:tc:opendocument:xmlns:container",
+    "opf": "http://www.idpf.org/2007/opf",
+    "dc": "http://purl.org/dc/elements/1.1/",
+    "x": "http://www.w3.org/1999/xhtml",
+}
+
+
+def make_image(path: Path, size=(80, 120), fmt=None, color=(200, 30, 30)) -> bytes:
+    """在 path 產生一張圖片並回傳它的位元組。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fmt = fmt or {".jpg": "JPEG", ".jpeg": "JPEG", ".png": "PNG",
+                  ".webp": "WEBP", ".gif": "GIF"}[path.suffix.lower()]
+    img = Image.new("RGB", size, color)
+    buf = io.BytesIO()
+    img.save(buf, fmt)
+    path.write_bytes(buf.getvalue())
+    return buf.getvalue()
+
+
+class Epub:
+    """把 EPUB 解開後，提供測試斷言用的觀察方法。"""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.zip = zipfile.ZipFile(path)
+        container = ET.fromstring(self.zip.read("META-INF/container.xml"))
+        rootfile = container.find(".//c:rootfile", NS)
+        self.opf_path = rootfile.get("full-path")
+        self.opf_dir = self.opf_path.rpartition("/")[0]
+        self.opf = ET.fromstring(self.zip.read(self.opf_path))
+
+    def resolve(self, href: str, base_dir: str = None) -> str:
+        base = self.opf_dir if base_dir is None else base_dir
+        parts = [p for p in (base + "/" + href).split("/") if p]
+        out = []
+        for p in parts:
+            if p == "..":
+                out.pop()
+            elif p != ".":
+                out.append(p)
+        return "/".join(out)
+
+    def manifest(self) -> dict:
+        return {i.get("id"): i for i in self.opf.findall(".//opf:manifest/opf:item", NS)}
+
+    def spine_items(self) -> list:
+        manifest = self.manifest()
+        return [manifest[r.get("idref")] for r in self.opf.findall(".//opf:spine/opf:itemref", NS)]
+
+    def page_paths(self) -> list:
+        return [self.resolve(i.get("href")) for i in self.spine_items()]
+
+    def page_text(self, page_path: str) -> str:
+        return self.zip.read(page_path).decode("utf-8")
+
+    def page_image_path(self, page_path: str) -> str:
+        src = re.search(r'<img[^>]*\ssrc="([^"]+)"', self.page_text(page_path)).group(1)
+        return self.resolve(src, page_path.rpartition("/")[0])
+
+    def page_images(self) -> list:
+        """依 spine 順序回傳每頁圖片的位元組。"""
+        return [self.zip.read(self.page_image_path(p)) for p in self.page_paths()]
+
+    def viewport(self, page_path: str):
+        m = re.search(r'name="viewport"\s+content="width=(\d+),\s*height=(\d+)"',
+                      self.page_text(page_path))
+        return int(m.group(1)), int(m.group(2))
+
+    def meta_property(self, prop: str):
+        for m in self.opf.findall(".//opf:metadata/opf:meta", NS):
+            if m.get("property") == prop:
+                return m.text
+        return None
+
+    def dc(self, name: str):
+        el = self.opf.find(f".//opf:metadata/dc:{name}", NS)
+        return None if el is None else el.text
+
+    def cover_items(self) -> list:
+        return [i for i in self.manifest().values()
+                if "cover-image" in (i.get("properties") or "").split()]
+
+    def nav_links(self) -> list:
+        """回傳 navigation document 的 toc 連結 [(文字, 解析後路徑)]。"""
+        nav_item = next(i for i in self.manifest().values()
+                        if "nav" in (i.get("properties") or "").split())
+        nav_path = self.resolve(nav_item.get("href"))
+        root = ET.fromstring(self.zip.read(nav_path))
+        base = nav_path.rpartition("/")[0]
+        links = []
+        for a in root.iter("{%s}a" % NS["x"]):
+            href = a.get("href").split("#")[0]
+            links.append(("".join(a.itertext()), self.resolve(href, base)))
+        return links
