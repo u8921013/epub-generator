@@ -36,6 +36,9 @@ class BookSpec:
     direction: str = "rtl"  # 翻頁方向，"rtl" 或 "ltr"
     spread: bool = False  # 是否啟用雙頁模式
     chapters: tuple[TocEntry, ...] = ()  # 空的話，目錄只有一個指向第一頁的項目
+    author: str | None = None
+    cover_page: int = 1  # 哪一頁的圖片是封面（從 1 起算）
+    external_cover: PageImage | None = None  # 不屬於任何頁面的封面圖；有的話優先於 cover_page
 
 
 def _spread_property(index: int, direction: str) -> str:
@@ -95,7 +98,8 @@ def _package_opf(book: BookSpec, identifier: str, modified: str) -> str:
     manifest = ['    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>']
     spine = []
     for i, page in enumerate(book.pages, start=1):
-        props = ' properties="cover-image"' if i == 1 else ""
+        is_cover = book.external_cover is None and i == book.cover_page
+        props = ' properties="cover-image"' if is_cover else ""
         manifest.append(
             f'    <item id="img-{i:04d}" href="images/img-{i:04d}{page.extension}"'
             f' media-type="{page.media_type}"{props}/>'
@@ -108,12 +112,20 @@ def _package_opf(book: BookSpec, identifier: str, modified: str) -> str:
         if book.spread:
             props = f' properties="rendition:page-spread-{_spread_property(i, book.direction)}"'
         spine.append(f'    <itemref idref="page-{i:04d}"{props}/>')
+    if book.external_cover is not None:
+        cover = book.external_cover
+        manifest.append(
+            f'    <item id="cover-image" href="images/cover{cover.extension}"'
+            f' media-type="{cover.media_type}" properties="cover-image"/>'
+        )
+    creator = f"    <dc:creator>{escape(book.author)}</dc:creator>\n" if book.author else ""
     return (
         XML_DECL
         + '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">\n'
         + '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n'
         + f'    <dc:identifier id="book-id">{identifier}</dc:identifier>\n'
         + f"    <dc:title>{escape(book.title)}</dc:title>\n"
+        + creator
         + f"    <dc:language>{escape(book.language)}</dc:language>\n"
         + f'    <meta property="dcterms:modified">{modified}</meta>\n'
         + '    <meta property="rendition:layout">pre-paginated</meta>\n'
@@ -140,3 +152,6 @@ def write_epub(book: BookSpec, destination: Path) -> None:
                        compress_type=zipfile.ZIP_DEFLATED)
             z.writestr(f"OEBPS/images/img-{i:04d}{page.extension}", page.data,
                        compress_type=zipfile.ZIP_STORED)
+        if book.external_cover is not None:
+            z.writestr(f"OEBPS/images/cover{book.external_cover.extension}",
+                       book.external_cover.data, compress_type=zipfile.ZIP_STORED)

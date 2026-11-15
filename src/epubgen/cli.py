@@ -4,7 +4,8 @@ import argparse
 import sys
 from importlib.metadata import PackageNotFoundError, version
 
-from . import EpubgenError, build_epub
+from . import BuildOptions, EpubgenError, build_epub
+from .metadata import is_valid_language
 from .epub import DIRECTIONS
 
 
@@ -13,6 +14,12 @@ def _version() -> str:
         return version("epubgen")
     except PackageNotFoundError:
         return "unknown"
+
+
+def _language(value: str) -> str:
+    if not is_valid_language(value):
+        raise argparse.ArgumentTypeError(f"不合法的語言代碼：{value!r}（例如 ja、zh-TW）")
+    return value
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,6 +48,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--skip-broken", action="store_true",
         help="跳過無法讀取的圖片並在結束時列出（預設：遇到損毀圖片就報錯）",
     )
+    parser.add_argument(
+        "--title", metavar="TITLE",
+        help="書名（預設：輸入資料夾名稱）；預設輸出檔名也跟著書名",
+    )
+    parser.add_argument("--author", metavar="NAME", help="作者（預設：不寫入）")
+    parser.add_argument(
+        "--language", metavar="CODE", type=_language, default="zh-TW",
+        help="語言代碼，例如 ja、en、zh-TW（預設：zh-TW）",
+    )
+    parser.add_argument(
+        "--cover", metavar="IMAGE",
+        help="指定封面圖片，可以在輸入資料夾內或外；相對路徑從目前目錄算起（預設：第一頁）",
+    )
     parser.add_argument("--version", action="version", version=f"epubgen {_version()}")
     return parser
 
@@ -48,9 +68,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        result = build_epub(args.input, output=args.output, force=args.force,
-                            skip_broken=args.skip_broken, direction=args.direction,
-                            spread=args.spread)
+        result = build_epub(args.input, BuildOptions(
+            output=args.output, force=args.force, skip_broken=args.skip_broken,
+            direction=args.direction, spread=args.spread, title=args.title,
+            author=args.author, language=args.language, cover=args.cover,
+        ))
     except EpubgenError as exc:
         print(f"epubgen: 錯誤：{exc}", file=sys.stderr)
         return 1
