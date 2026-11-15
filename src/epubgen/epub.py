@@ -19,11 +19,27 @@ CONTAINER_XML = XML_DECL + """<container version="1.0" xmlns="urn:oasis:names:tc
 """
 
 
+DIRECTIONS = ("rtl", "ltr")
+
+
 @dataclass(frozen=True)
 class BookSpec:
     title: str
     language: str
     pages: list[PageImage]
+    direction: str = "rtl"  # 翻頁方向，"rtl" 或 "ltr"
+    spread: bool = False  # 是否啟用雙頁模式
+
+
+def _spread_property(index: int, direction: str) -> str:
+    """雙頁模式下第 index 頁（從 1 起算）的左右頁標記。
+
+    封面單獨一頁；其後依閱讀方向交替：RTL 右頁在先，LTR 左頁在先。
+    """
+    if index == 1:
+        return "center"
+    first, second = ("right", "left") if direction == "rtl" else ("left", "right")
+    return first if index % 2 == 0 else second
 
 
 def _page_xhtml(index: int, page: PageImage, title: str) -> str:
@@ -75,7 +91,10 @@ def _package_opf(book: BookSpec, identifier: str, modified: str) -> str:
             f'    <item id="page-{i:04d}" href="pages/page-{i:04d}.xhtml"'
             f' media-type="application/xhtml+xml"/>'
         )
-        spine.append(f'    <itemref idref="page-{i:04d}"/>')
+        props = ""
+        if book.spread:
+            props = f' properties="rendition:page-spread-{_spread_property(i, book.direction)}"'
+        spine.append(f'    <itemref idref="page-{i:04d}"{props}/>')
     return (
         XML_DECL
         + '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">\n'
@@ -85,9 +104,10 @@ def _package_opf(book: BookSpec, identifier: str, modified: str) -> str:
         + f"    <dc:language>{escape(book.language)}</dc:language>\n"
         + f'    <meta property="dcterms:modified">{modified}</meta>\n'
         + '    <meta property="rendition:layout">pre-paginated</meta>\n'
+        + f'    <meta property="rendition:spread">{"landscape" if book.spread else "none"}</meta>\n'
         + "  </metadata>\n"
         + "  <manifest>\n" + "\n".join(manifest) + "\n  </manifest>\n"
-        + "  <spine>\n" + "\n".join(spine) + "\n  </spine>\n"
+        + f'  <spine page-progression-direction="{book.direction}">\n' + "\n".join(spine) + "\n  </spine>\n"
         + "</package>\n"
     )
 

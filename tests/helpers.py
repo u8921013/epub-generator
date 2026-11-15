@@ -103,3 +103,13 @@ class Epub:
             href = a.get("href").split("#")[0]
             links.append(("".join(a.itertext()), self.resolve(href, base)))
         return links
+
+
+def spine_direction(book: "Epub"):
+    return book.opf.find(".//opf:spine", NS).get("page-progression-direction")
+
+
+def spine_spread_properties(book: "Epub") -> list:
+    """回傳每個 spine itemref 的 properties（以空白切開的 list）。"""
+    return [(r.get("properties") or "").split()
+            for r in book.opf.findall(".//opf:spine/opf:itemref", NS)]

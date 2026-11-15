@@ -5,7 +5,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from .epub import BookSpec, write_epub
+from .epub import DIRECTIONS, BookSpec, write_epub
 from .errors import BrokenImageError, EpubgenError
 from .images import load_image
 from .scan import scan_pages
@@ -27,13 +27,18 @@ def build_epub(
     output: Path | None = None,
     force: bool = False,
     skip_broken: bool = False,
+    direction: str = "rtl",
+    spread: bool = False,
 ) -> BuildResult:
     """給定輸入資料夾，產生一個 EPUB 檔。
 
     輸出檔已存在時預設拒絕，force=True 才覆蓋。輸出先寫到暫存檔，
     成功後才移到目標路徑，失敗時不留下半成品。
     圖片損毀時預設報錯，skip_broken=True 則跳過並記錄在結果的 skipped。
+    direction 是翻頁方向（"rtl" 或 "ltr"），spread=True 啟用雙頁模式。
     """
+    if direction not in DIRECTIONS:
+        raise EpubgenError(f"不合法的翻頁方向：{direction}（可用：{', '.join(DIRECTIONS)}）")
     folder = Path(input_dir).resolve()
     if not folder.exists():
         raise EpubgenError(f"輸入路徑不存在：{input_dir}")
@@ -51,7 +56,8 @@ def build_epub(
         names = "".join(f"\n  - {n}" for n in skipped)
         raise EpubgenError(f"所有圖片都無法讀取，沒有可用的圖片：{names}")
 
-    book = BookSpec(title=title, language=DEFAULT_LANGUAGE, pages=pages)
+    book = BookSpec(title=title, language=DEFAULT_LANGUAGE, pages=pages,
+                    direction=direction, spread=spread)
     _write_atomically(book, destination, force)
     return BuildResult(output=destination, page_count=len(pages), skipped=tuple(skipped))
 

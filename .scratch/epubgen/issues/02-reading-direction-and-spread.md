@@ -8,11 +8,11 @@
 
 **Status:** ready-for-agent
 
-- [ ] 預設的 page progression direction 是 RTL
-- [ ] `--direction ltr` 把 page progression direction 改成 LTR
-- [ ] 預設所有頁面都不合併成跨頁
-- [ ] `--spread` 時封面單獨顯示
-- [ ] `--spread` 且 RTL 時，封面之後的頁面依序標記為右、左、右、左…
-- [ ] `--spread` 且 LTR 時，封面之後的頁面依序標記為左、右、左、右…
-- [ ] `--help` 顯示這兩個參數與預設值
-- [ ] 以上行為都有透過 CLI 進入點的測試
+- [x] 預設的 page progression direction 是 RTL
+- [x] `--direction ltr` 把 page progression direction 改成 LTR
+- [x] 預設所有頁面都不合併成跨頁
+- [x] `--spread` 時封面單獨顯示
+- [x] `--spread` 且 RTL 時，封面之後的頁面依序標記為右、左、右、左…
+- [x] `--spread` 且 LTR 時，封面之後的頁面依序標記為左、右、左、右…
+- [x] `--help` 顯示這兩個參數與預設值
+- [x] 以上行為都有透過 CLI 進入點的測試

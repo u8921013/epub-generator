@@ -1,0 +1,112 @@
+import pytest
+
+from epubgen.cli import main
+from tests.helpers import Epub, make_image, spine_direction, spine_spread_properties
+
+
+@pytest.fixture
+def comic(tmp_path):
+    folder = tmp_path / "my-comic"
+    folder.mkdir()
+    for n in range(1, 6):
+        make_image(folder / f"{n}.jpg")
+    return folder
+
+
+def build(comic, *args):
+    code = main([str(comic), *args])
+    assert code == 0
+    return Epub(comic.parent / "my-comic.epub")
+
+
+def spread_roles(book):
+    """把每頁的 spread 標記簡化成 center / left / right / none。"""
+    out = []
+    for props in spine_spread_properties(book):
+        roles = [p.removeprefix("rendition:page-spread-") for p in props
+                 if p.startswith("rendition:page-spread-")]
+        out.append(roles[0] if roles else "none")
+    return out
+
+
+# --- 閱讀方向 -----------------------------------------------------------------
+
+def test_default_direction_is_right_to_left(comic):
+    assert spine_direction(build(comic)) == "rtl"
+
+
+def test_direction_ltr_changes_page_progression(comic):
+    assert spine_direction(build(comic, "--direction", "ltr")) == "ltr"
+
+
+def test_direction_rtl_can_be_given_explicitly(comic):
+    assert spine_direction(build(comic, "--direction", "rtl")) == "rtl"
+
+
+def test_invalid_direction_shows_usage_and_fails(comic, capsys):
+    with pytest.raises(SystemExit) as exc:
+        main([str(comic), "--direction", "up"])
+
+    captured = capsys.readouterr()
+    assert exc.value.code != 0
+    assert "usage" in captured.err.lower()
+    assert "up" in captured.err
+    assert not (comic.parent / "my-comic.epub").exists()
+
+
+def test_direction_does_not_change_page_order(comic):
+    rtl = build(comic)
+    images_rtl = rtl.page_images()
+    (comic.parent / "my-comic.epub").unlink()
+    ltr = build(comic, "--direction", "ltr")
+    assert ltr.page_images() == images_rtl
+
+
+# --- 跨頁 ---------------------------------------------------------------------
+
+def test_default_pages_are_not_merged_into_spreads(comic):
+    book = build(comic)
+    assert book.meta_property("rendition:spread") == "none"
+    assert spread_roles(book) == ["none"] * 5
+
+
+def test_spread_rtl_cover_alone_then_right_left_alternating(comic):
+    book = build(comic, "--spread")
+    assert book.meta_property("rendition:spread") != "none"
+    assert spread_roles(book) == ["center", "right", "left", "right", "left"]
+
+
+def test_spread_ltr_cover_alone_then_left_right_alternating(comic):
+    book = build(comic, "--spread", "--direction", "ltr")
+    assert spread_roles(book) == ["center", "left", "right", "left", "right"]
+
+
+def test_spread_keeps_the_declared_direction(comic):
+    assert spine_direction(build(comic, "--spread")) == "rtl"
+
+
+def test_spread_with_a_single_page_book_only_has_the_cover(tmp_path):
+    folder = tmp_path / "solo"
+    folder.mkdir()
+    make_image(folder / "1.jpg")
+    assert main([str(folder), "--spread"]) == 0
+    assert spread_roles(Epub(tmp_path / "solo.epub")) == ["center"]
+
+
+def test_spread_does_not_change_page_order_or_viewports(comic):
+    plain = build(comic)
+    images = plain.page_images()
+    viewports = [plain.viewport(p) for p in plain.page_paths()]
+    (comic.parent / "my-comic.epub").unlink()
+    spread = build(comic, "--spread")
+    assert spread.page_images() == images
+    assert [spread.viewport(p) for p in spread.page_paths()] == viewports
+
+
+def test_help_lists_direction_and_spread_with_defaults(capsys):
+    with pytest.raises(SystemExit):
+        main(["--help"])
+    out = capsys.readouterr().out
+    assert "--direction" in out
+    assert "rtl" in out and "ltr" in out
+    assert "--spread" in out
