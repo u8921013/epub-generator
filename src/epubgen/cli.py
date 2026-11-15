@@ -28,6 +28,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true",
         help="輸出檔已存在時覆蓋它（預設：拒絕覆蓋）",
     )
+    parser.add_argument(
+        "--skip-broken", action="store_true",
+        help="跳過無法讀取的圖片並在結束時列出（預設：遇到損毀圖片就報錯）",
+    )
     parser.add_argument("--version", action="version", version=f"epubgen {_version()}")
     return parser
 
@@ -35,10 +39,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        result = build_epub(args.input, output=args.output, force=args.force)
+        result = build_epub(args.input, output=args.output, force=args.force,
+                            skip_broken=args.skip_broken)
     except EpubgenError as exc:
         print(f"epubgen: 錯誤：{exc}", file=sys.stderr)
         return 1
+    if result.skipped:
+        print(f"epubgen: 已跳過 {len(result.skipped)} 張無法讀取的圖片：", file=sys.stderr)
+        for name in result.skipped:
+            print(f"  - {name}", file=sys.stderr)
     print(f"已輸出：{result.output}（共 {result.page_count} 頁）")
     return 0
 
