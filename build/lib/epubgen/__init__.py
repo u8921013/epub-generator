@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .epub import DIRECTIONS, BookSpec, TocEntry, write_epub
 from .errors import BrokenImageError, EpubgenError
+from .layout import page_viewports
 from .images import ImageSettings, PageImage, cover_as_jpeg, load_image
 from .metadata import is_valid_language, safe_file_name
 from .scan import IMAGE_EXTENSIONS, Book, scan_book
@@ -81,6 +82,7 @@ def build_epub(input_dir: Path, options: BuildOptions = BuildOptions()) -> Build
         title=title, language=options.language, pages=loaded.pages,
         direction=options.direction, spread=options.spread, chapters=tuple(loaded.toc),
         author=options.author, cover_page=cover_page, external_cover=external_cover,
+        viewports=tuple(page_viewports(loaded.pages)),
     )
     _write_atomically(book, destination, options.force)
     return BuildResult(output=destination, page_count=len(loaded.pages),

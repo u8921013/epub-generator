@@ -73,7 +73,8 @@ def test_one_page_per_image_in_natural_order(comic):
 
 
 def test_each_page_viewport_matches_its_image_size(comic):
-    sizes = [(300, 500), (310, 510), (290, 480), (120, 80)]
+    # 形狀差很多的頁面各自保留自己的尺寸（形狀接近的頁面共用尺寸，見 test_page_viewports.py）
+    sizes = [(300, 500), (300, 500), (500, 300), (100, 400)]
     for n, size in enumerate(sizes, start=1):
         make_image(comic / f"{n}.png", size=size)
     run(comic)

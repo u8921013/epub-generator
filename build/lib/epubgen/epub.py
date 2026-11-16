@@ -8,6 +8,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape, quoteattr
 
 from .images import PageImage
+from .layout import fit_inside
 
 XML_DECL = '<?xml version="1.0" encoding="UTF-8"?>\n'
 
@@ -39,6 +40,7 @@ class BookSpec:
     author: str | None = None
     cover_page: int = 1  # 哪一頁的圖片是封面（從 1 起算）
     external_cover: PageImage | None = None  # 不屬於任何頁面的封面圖；有的話優先於 cover_page
+    viewports: tuple[tuple[int, int], ...] = ()  # 每頁的 viewport；空的話用各頁圖片自己的尺寸
 
 
 def _spread_property(index: int, direction: str) -> str | None:
@@ -59,8 +61,15 @@ def _spread_property(index: int, direction: str) -> str | None:
     return f"page-spread-{side}"
 
 
-def _page_xhtml(index: int, page: PageImage, title: str) -> str:
-    w, h = page.width, page.height
+def _page_xhtml(index: int, page: PageImage, title: str, viewport: tuple[int, int]) -> str:
+    w, h = viewport
+    if viewport == (page.width, page.height):
+        img_css = f"img {{ display: block; width: {w}px; height: {h}px; }}"
+    else:
+        # viewport 與圖片尺寸不同（第一頁配合其餘頁面的比例）：圖片等比例縮放並置中，不變形。
+        left, top, iw, ih = fit_inside(page, viewport)
+        img_css = (f"img {{ position: absolute; left: {left}px; top: {top}px; "
+                   f"width: {iw}px; height: {ih}px; }}")
     return (
         XML_DECL
         + '<!DOCTYPE html>\n'
@@ -70,7 +79,7 @@ def _page_xhtml(index: int, page: PageImage, title: str) -> str:
         + f"  <title>{escape(title)} - {index}</title>\n"
         + f'  <meta name="viewport" content="width={w}, height={h}"/>\n'
         + f"  <style>html, body {{ margin: 0; padding: 0; width: {w}px; height: {h}px; }}"
-        + f" img {{ display: block; width: {w}px; height: {h}px; }}</style>\n"
+        + f" {img_css}</style>\n"
         + "</head>\n"
         + "<body>\n"
         + f'  <img src="../images/img-{index:04d}{page.extension}" alt=""/>\n'
@@ -153,8 +162,9 @@ def write_epub(book: BookSpec, destination: Path) -> None:
                    compress_type=zipfile.ZIP_DEFLATED)
         z.writestr("OEBPS/nav.xhtml", _nav_xhtml(book),
                    compress_type=zipfile.ZIP_DEFLATED)
+        viewports = book.viewports or [(p.width, p.height) for p in book.pages]
         for i, page in enumerate(book.pages, start=1):
-            z.writestr(f"OEBPS/pages/page-{i:04d}.xhtml", _page_xhtml(i, page, book.title),
+            z.writestr(f"OEBPS/pages/page-{i:04d}.xhtml", _page_xhtml(i, page, book.title, viewports[i - 1]),
                        compress_type=zipfile.ZIP_DEFLATED)
             z.writestr(f"OEBPS/images/img-{i:04d}{page.extension}", page.data,
                        compress_type=zipfile.ZIP_STORED)

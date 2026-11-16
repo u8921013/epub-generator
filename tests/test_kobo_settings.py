@@ -58,11 +58,11 @@ def test_page_progression_direction_is_declared_on_the_spine(built):
 def test_viewport_is_identical_in_meta_and_css_and_matches_the_image(built):
     """Kobo：viewport 在 meta 與 CSS 一致，圖片寬高比與 viewport 相符。
 
-    第一頁例外：比例跟其餘頁面不同時，viewport 改用其餘頁面的形狀（票 13），
-    圖片等比例縮放置中，不變形。
+    第一頁與形狀接近的頁面共用同一個 viewport（票 13），圖片等比例縮放置中、不變形，
+    所以寬高比相差最多約 5%，Kobo 規格要求的是寬高比相符、尺寸不必相同。
     """
     book, _, _ = built
-    for index, page in enumerate(book.page_paths()):
+    for page in book.page_paths():
         text = book.page_text(page)
         meta_w, meta_h = book.viewport(page)
         css = re.search(r"html, body \{[^}]*width: (\d+)px; height: (\d+)px", text)
@@ -70,11 +70,9 @@ def test_viewport_is_identical_in_meta_and_css_and_matches_the_image(built):
         img_css = re.search(r"img \{[^}]*width: (\d+)px; height: (\d+)px", text)
         shown = (int(img_css.group(1)), int(img_css.group(2)))
         with Image.open(io.BytesIO(book.zip.read(book.page_image_path(page)))) as img:
-            if index > 0:
-                assert img.size == shown == (meta_w, meta_h)
-            else:
-                assert shown[0] <= meta_w and shown[1] <= meta_h
-                assert abs(shown[0] / shown[1] - img.size[0] / img.size[1]) < 0.01
+            assert shown[0] <= meta_w and shown[1] <= meta_h
+            assert shown[0] == meta_w or shown[1] == meta_h
+            assert abs(shown[0] / shown[1] - img.size[0] / img.size[1]) < 0.01
 
 
 def test_every_page_is_its_own_document_with_one_img_and_no_background_image(built):

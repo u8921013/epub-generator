@@ -273,7 +273,7 @@ def test_invalid_max_size_shows_usage_and_fails(comic, capsys, bad):
 
 def test_a_resized_cover_page_is_the_cover_image(comic):
     save(comic / "1.jpg", noise((1000, 1500)), "JPEG")
-    save(comic / "2.jpg", noise((100, 150)), "JPEG")
+    save(comic / "2.jpg", noise((900, 1350)), "JPEG")
 
     run(comic, "--max-size", "300")
 
