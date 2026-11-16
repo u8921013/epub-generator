@@ -28,7 +28,7 @@
 
 - 依票 07 的結論維持「預設轉 JPEG」，沒有調整預設值。`--keep-webp` 的 `--help` 說明寫的是「不是所有閱讀器都能顯示 WebP」。
 - 外部 `--cover` 指向 WebP 時，同樣預設轉成 JPEG，加了 `--keep-webp` 則保留。
-- 票 04 的 EPUBCheck 情境新增「webp-converted」與「webp-kept」兩個，12 個情境都通過，保留 WebP 的書沒有 fallback 錯誤。
+- 票 11 的 EPUBCheck 情境新增「webp-converted」與「webp-kept」兩個，12 個情境都通過，保留 WebP 的書沒有 fallback 錯誤。
 - 因為 WebP 預設不再原樣打包，票 01 的「所有支援格式位元組不變」測試改為加上 `--keep-webp`。
 - 動畫 WebP 只會轉出第一個畫格，spec 沒有規定動畫處理。
 - 未處理：票 07 提到 GIF 當封面在 Kobo 不支援。這不在本票驗收範圍，需要另外決定是否把 GIF 封面轉成 JPEG。
