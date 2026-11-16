@@ -37,6 +37,12 @@ def with_webp(folder):
     make_image(folder / "2.webp", size=(300, 500))
 
 
+def square_cover(folder):
+    make_image(folder / "1.jpg", size=(1523, 1469))
+    for n in range(2, 6):
+        make_image(folder / f"{n}.jpg", size=(1200, 1700 + n * 10))
+
+
 def gif_first(folder):
     make_image(folder / "1.gif", size=(300, 500))
     make_image(folder / "2.jpg", size=(300, 500))
@@ -57,8 +63,7 @@ SCENARIOS = {
     "metadata": (flat, ["--title", "A & B <x>", "--author", "某某", "--language", "ja"]),
     "special-characters": (special_characters, []),
     "gif-cover": (gif_first, []),
-    "uniform-size": (flat, ["--uniform-size"]),
-    "uniform-size-chapters": (chapters, ["--uniform-size", "--spread"]),
+    "square-cover": (square_cover, []),
     "quality-and-resize": (flat, ["--quality", "60", "--max-size", "400"]),
     "resize-only": (flat, ["--max-size", "250"]),
     "webp-converted": (with_webp, []),

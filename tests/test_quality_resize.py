@@ -208,13 +208,14 @@ def test_extreme_aspect_ratios_never_shrink_to_zero_pixels(comic):
 
 def test_each_page_gets_its_own_viewport(comic):
     save(comic / "1.jpg", noise((1000, 1500)), "JPEG")
-    save(comic / "2.jpg", noise((1600, 800)), "JPEG")
-    save(comic / "3.jpg", noise((100, 200)), "JPEG")
+    save(comic / "2.jpg", noise((900, 1350)), "JPEG")
+    save(comic / "3.jpg", noise((1600, 800)), "JPEG")
+    save(comic / "4.jpg", noise((100, 200)), "JPEG")
 
     run(comic, "--max-size", "500")
 
     epub = book(comic)
-    assert [page_size(epub, i) for i in range(3)] == [(333, 500), (500, 250), (100, 200)]
+    assert [page_size(epub, i) for i in range(4)] == [(333, 500), (333, 500), (500, 250), (100, 200)]
 
 
 def test_resizing_keeps_each_format_where_it_makes_sense(comic):

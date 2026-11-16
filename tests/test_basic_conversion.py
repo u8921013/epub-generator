@@ -73,14 +73,13 @@ def test_one_page_per_image_in_natural_order(comic):
 
 
 def test_each_page_viewport_matches_its_image_size(comic):
-    make_image(comic / "1.jpg", size=(300, 500))
-    make_image(comic / "2.png", size=(120, 80))
+    sizes = [(300, 500), (310, 510), (290, 480), (120, 80)]
+    for n, size in enumerate(sizes, start=1):
+        make_image(comic / f"{n}.png", size=size)
     run(comic)
 
     book = Epub(comic.parent / "my-comic.epub")
-    pages = book.page_paths()
-    assert book.viewport(pages[0]) == (300, 500)
-    assert book.viewport(pages[1]) == (120, 80)
+    assert [book.viewport(p) for p in book.page_paths()] == sizes
 
 
 def test_image_bytes_are_packaged_unchanged_for_every_supported_format(comic):
