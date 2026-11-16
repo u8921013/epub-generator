@@ -169,6 +169,10 @@ def _write_atomically(book: BookSpec, destination: Path, force: bool) -> None:
         raise EpubgenError(f"無法寫入輸出檔：{destination}（{exc.strerror or exc}）") from exc
     os.close(fd)
     tmp = Path(tmp_name)
+    # mkstemp 建立的檔案只有擁有者能讀寫；輸出檔應該跟一般新建的檔案一樣遵守 umask。
+    umask = os.umask(0)
+    os.umask(umask)
+    os.chmod(tmp, 0o666 & ~umask)
     try:
         write_epub(book, tmp)
         _check_destination(destination, force)  # 寫入期間目標可能被別人建立

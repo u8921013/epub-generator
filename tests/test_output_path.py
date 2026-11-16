@@ -176,3 +176,16 @@ def test_help_lists_output_and_force(capsys):
     out = capsys.readouterr().out
     assert "-o" in out
     assert "--force" in out
+
+
+def test_output_file_has_the_permissions_of_a_normally_created_file(comic, tmp_path):
+    import os
+    import stat
+
+    umask = os.umask(0)
+    os.umask(umask)
+    target = tmp_path / "perm.epub"
+
+    run(comic, "-o", target)
+
+    assert stat.S_IMODE(target.stat().st_mode) == 0o666 & ~umask
