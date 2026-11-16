@@ -14,7 +14,7 @@
 - [x] 這些設定在所有選項組合下都存在（至少涵蓋預設、`--direction ltr`、`--spread` 中已實作的部分）
 - [x] 仍然只產生一個輸出檔
 - [x] 既有測試全部通過，票 01 定義的 EPUB 結構沒有被破壞
-- [x] 若環境有 EPUBCheck，產出的 EPUB 沒有錯誤
+- [ ] 若環境有 EPUBCheck，產出的 EPUB 沒有錯誤（本機沒有 EPUBCheck，未執行，留給票 11）
 - [x] 以上行為都有透過 CLI 進入點的測試
 
 ## Comments
