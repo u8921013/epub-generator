@@ -101,6 +101,12 @@ def build_parser() -> argparse.ArgumentParser:
         help=("圖片長邊的像素上限（預設：不縮放）。超過的圖片等比例縮小，不會放大。"
               "縮小後 JPEG 維持 JPEG、PNG 維持 PNG（無損）、GIF 與預設的 WebP 轉成 JPEG"),
     )
+    parser.add_argument(
+        "--uniform-size", action="store_true",
+        help=("讓寬高比接近的頁面共用同一個版面尺寸（預設：每頁的版面尺寸等於該圖片自己的尺寸）。"
+              "掃圖每頁差幾個像素時，Apple Books 換頁會先顯示再重新調整高度、畫面會跳一下，"
+              "用這個選項可以避免；圖片不會被重新取樣，只是等比例縮放置中，寬高比差太多的頁面維持原尺寸"),
+    )
     parser.add_argument("--version", action="version", version=f"epubgen {_version()}")
     return parser
 
@@ -113,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
             direction=args.direction, spread=args.spread, title=args.title,
             author=args.author, language=args.language, cover=args.cover,
             keep_webp=args.keep_webp, quality=args.quality, max_size=args.max_size,
+            uniform_size=args.uniform_size,
         ))
     except EpubgenError as exc:
         print(f"epubgen: 錯誤：{exc}", file=sys.stderr)

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .epub import DIRECTIONS, BookSpec, TocEntry, write_epub
 from .errors import BrokenImageError, EpubgenError
+from .layout import own_viewports, uniform_viewports
 from .images import ImageSettings, PageImage, cover_as_jpeg, load_image
 from .metadata import is_valid_language, safe_file_name
 from .scan import IMAGE_EXTENSIONS, Book, scan_book
@@ -30,6 +31,7 @@ class BuildOptions:
     keep_webp: bool = False  # 預設把 WebP 轉成 JPEG；True 則保留原檔
     quality: int | None = None  # 重新壓縮的 JPEG 品質（1–100）；預設不重新壓縮
     max_size: int | None = None  # 長邊的像素上限；預設不縮放
+    uniform_size: bool = False  # 寬高比接近的頁面共用同一個版面尺寸
 
 
 @dataclass(frozen=True)
@@ -77,10 +79,12 @@ def build_epub(input_dir: Path, options: BuildOptions = BuildOptions()) -> Build
         raise EpubgenError(f"所有圖片都無法讀取，沒有可用的圖片：{names}")
     cover_page, external_cover = _resolve_cover(options.cover, loaded, settings)
 
+    layout = uniform_viewports if options.uniform_size else own_viewports
     book = BookSpec(
         title=title, language=options.language, pages=loaded.pages,
         direction=options.direction, spread=options.spread, chapters=tuple(loaded.toc),
         author=options.author, cover_page=cover_page, external_cover=external_cover,
+        viewports=tuple(layout(loaded.pages)),
     )
     _write_atomically(book, destination, options.force)
     return BuildResult(output=destination, page_count=len(loaded.pages),
