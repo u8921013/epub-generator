@@ -67,6 +67,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--cover", metavar="IMAGE",
         help="指定封面圖片，可以在輸入資料夾內或外；相對路徑從目前目錄算起（預設：第一頁）",
     )
+    parser.add_argument(
+        "--keep-webp", action="store_true",
+        help="保留 WebP 原檔（預設：把 WebP 轉成高品質 JPEG，因為不是所有閱讀器都能顯示 WebP）",
+    )
     parser.add_argument("--version", action="version", version=f"epubgen {_version()}")
     return parser
 
@@ -78,6 +82,7 @@ def main(argv: list[str] | None = None) -> int:
             output=args.output, force=args.force, skip_broken=args.skip_broken,
             direction=args.direction, spread=args.spread, title=args.title,
             author=args.author, language=args.language, cover=args.cover,
+            keep_webp=args.keep_webp,
         ))
     except EpubgenError as exc:
         print(f"epubgen: 錯誤：{exc}", file=sys.stderr)

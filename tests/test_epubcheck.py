@@ -51,7 +51,8 @@ SCENARIOS = {
     "chapters-spread": (chapters, ["--spread", "--direction", "ltr"]),
     "metadata": (flat, ["--title", "A & B <x>", "--author", "某某", "--language", "ja"]),
     "special-characters": (special_characters, []),
-    "webp": (with_webp, []),
+    "webp-converted": (with_webp, []),
+    "webp-kept": (with_webp, ["--keep-webp"]),
 }
 
 

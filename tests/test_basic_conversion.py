@@ -86,7 +86,7 @@ def test_each_page_viewport_matches_its_image_size(comic):
 def test_image_bytes_are_packaged_unchanged_for_every_supported_format(comic):
     originals = [make_image(comic / name) for name in
                  ("1.jpg", "2.JPEG", "3.png", "4.webp", "5.gif")]
-    run(comic)
+    run(comic, "--keep-webp")  # WebP 預設會轉成 JPEG，保留原檔要明確要求（票 08）
 
     book = Epub(comic.parent / "my-comic.epub")
     assert book.page_images() == originals

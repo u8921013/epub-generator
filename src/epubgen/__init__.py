@@ -27,6 +27,7 @@ class BuildOptions:
     author: str | None = None
     language: str = DEFAULT_LANGUAGE
     cover: Path | None = None  # 預設：第一頁
+    keep_webp: bool = False  # 預設把 WebP 轉成 JPEG；True 則保留原檔
 
 
 @dataclass(frozen=True)
@@ -63,11 +64,11 @@ def build_epub(input_dir: Path, options: BuildOptions = BuildOptions()) -> Build
     scanned = scan_book(folder)
     if not scanned.pages:
         raise EpubgenError(f"資料夾裡沒有可用的圖片：{input_dir}")
-    loaded = _load_pages(folder, scanned, options.skip_broken)
+    loaded = _load_pages(folder, scanned, options.skip_broken, options.keep_webp)
     if not loaded.pages:
         names = "".join(f"\n  - {n}" for n in loaded.skipped)
         raise EpubgenError(f"所有圖片都無法讀取，沒有可用的圖片：{names}")
-    cover_page, external_cover = _resolve_cover(options.cover, loaded.page_of)
+    cover_page, external_cover = _resolve_cover(options.cover, loaded.page_of, options.keep_webp)
 
     book = BookSpec(
         title=title, language=options.language, pages=loaded.pages,
@@ -79,7 +80,7 @@ def build_epub(input_dir: Path, options: BuildOptions = BuildOptions()) -> Build
                        skipped=tuple(loaded.skipped))
 
 
-def _resolve_cover(cover: Path | None, page_of: dict[Path, int]):
+def _resolve_cover(cover: Path | None, page_of: dict[Path, int], keep_webp: bool):
     """回傳 (封面是第幾頁, 不屬於任何頁面的外部封面圖)。
 
     封面指向書裡的某一頁時直接標記那一頁，不重複加入；否則另外載入。
@@ -95,7 +96,7 @@ def _resolve_cover(cover: Path | None, page_of: dict[Path, int]):
     if page is not None:
         return page, None
     try:
-        return 1, load_image(path)
+        return 1, load_image(path, keep_webp=keep_webp)
     except BrokenImageError as exc:
         raise EpubgenError(f"無法讀取封面圖片：{cover}") from exc
 
@@ -108,7 +109,7 @@ class _LoadedPages:
     page_of: dict[Path, int] = field(default_factory=dict)  # 圖片來源 → 第幾頁（從 1 起算）
 
 
-def _load_pages(folder: Path, scanned: Book, skip_broken: bool) -> _LoadedPages:
+def _load_pages(folder: Path, scanned: Book, skip_broken: bool, keep_webp: bool) -> _LoadedPages:
     """讀取所有圖片。
 
     章節的目錄項目指向該章第一張讀得出來的圖片；整章都讀不出來就不產生項目。
@@ -118,7 +119,7 @@ def _load_pages(folder: Path, scanned: Book, skip_broken: bool) -> _LoadedPages:
     def load(source: Path) -> bool:
         name = source.relative_to(folder).as_posix()
         try:
-            loaded.pages.append(load_image(source, name))
+            loaded.pages.append(load_image(source, name, keep_webp))
         except BrokenImageError as exc:
             if not skip_broken:
                 raise EpubgenError(f"{exc}（要跳過損毀的圖片請加上 --skip-broken）") from exc
