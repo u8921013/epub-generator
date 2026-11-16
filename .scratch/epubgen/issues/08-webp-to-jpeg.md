@@ -31,4 +31,4 @@
 - 票 11 的 EPUBCheck 情境新增「webp-converted」與「webp-kept」兩個，12 個情境都通過，保留 WebP 的書沒有 fallback 錯誤。
 - 因為 WebP 預設不再原樣打包，票 01 的「所有支援格式位元組不變」測試改為加上 `--keep-webp`。
 - 動畫 WebP 只會轉出第一個畫格，spec 沒有規定動畫處理。
-- 未處理：票 07 提到 GIF 當封面在 Kobo 不支援。這不在本票驗收範圍，需要另外決定是否把 GIF 封面轉成 JPEG。
+- GIF 封面（票 07 發現 Kobo 不支援）：依使用者決定，封面是 GIF 時另外產生一張 JPEG 當封面（第一個畫格、透明處合成到白底），頁面本身維持原始 GIF 位元組，所以這張 JPEG 是 manifest 中不屬於 spine 的獨立項目。無論封面是第一頁、`--cover` 指向的頁面，或書外的 GIF 都適用。

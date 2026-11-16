@@ -37,6 +37,11 @@ def with_webp(folder):
     make_image(folder / "2.webp", size=(300, 500))
 
 
+def gif_first(folder):
+    make_image(folder / "1.gif", size=(300, 500))
+    make_image(folder / "2.jpg", size=(300, 500))
+
+
 def special_characters(folder):
     make_image(folder / "A&B <1>" / "1.jpg", size=(300, 500))
     make_image(folder / "A&B <1>" / "2.jpg", size=(300, 500))
@@ -51,6 +56,7 @@ SCENARIOS = {
     "chapters-spread": (chapters, ["--spread", "--direction", "ltr"]),
     "metadata": (flat, ["--title", "A & B <x>", "--author", "某某", "--language", "ja"]),
     "special-characters": (special_characters, []),
+    "gif-cover": (gif_first, []),
     "webp-converted": (with_webp, []),
     "webp-kept": (with_webp, ["--keep-webp"]),
 }

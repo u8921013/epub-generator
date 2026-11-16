@@ -67,3 +67,12 @@ def load_image(path: Path, name: str | None = None, keep_webp: bool = False) -> 
         raise BrokenImageError(name) from exc
     extension = ".jpg" if suffix == ".jpeg" else suffix
     return PageImage(data, extension, MEDIA_TYPES[suffix], width, height)
+
+
+def cover_as_jpeg(page: PageImage) -> PageImage:
+    """把 GIF 封面轉成 JPEG（Kobo 不支援 GIF 封面）。動畫只取第一個畫格，透明處合成到白底。"""
+    with Image.open(io.BytesIO(page.data)) as img:
+        img.seek(0)
+        img.load()
+        data, width, height = _to_jpeg(img)
+    return PageImage(data, ".jpg", MEDIA_TYPES[".jpg"], width, height)

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .epub import DIRECTIONS, BookSpec, TocEntry, write_epub
 from .errors import BrokenImageError, EpubgenError
-from .images import PageImage, load_image
+from .images import PageImage, cover_as_jpeg, load_image
 from .metadata import is_valid_language, safe_file_name
 from .scan import IMAGE_EXTENSIONS, Book, scan_book
 
@@ -68,7 +68,7 @@ def build_epub(input_dir: Path, options: BuildOptions = BuildOptions()) -> Build
     if not loaded.pages:
         names = "".join(f"\n  - {n}" for n in loaded.skipped)
         raise EpubgenError(f"所有圖片都無法讀取，沒有可用的圖片：{names}")
-    cover_page, external_cover = _resolve_cover(options.cover, loaded.page_of, options.keep_webp)
+    cover_page, external_cover = _resolve_cover(options.cover, loaded, options.keep_webp)
 
     book = BookSpec(
         title=title, language=options.language, pages=loaded.pages,
@@ -80,11 +80,20 @@ def build_epub(input_dir: Path, options: BuildOptions = BuildOptions()) -> Build
                        skipped=tuple(loaded.skipped))
 
 
-def _resolve_cover(cover: Path | None, page_of: dict[Path, int], keep_webp: bool):
+def _resolve_cover(cover: Path | None, loaded: "_LoadedPages", keep_webp: bool):
     """回傳 (封面是第幾頁, 不屬於任何頁面的外部封面圖)。
 
     封面指向書裡的某一頁時直接標記那一頁，不重複加入；否則另外載入。
+    封面是 GIF 時，Kobo 不支援，所以另外產生一張 JPEG 當封面，頁面本身維持原樣。
     """
+    page, external = _pick_cover(cover, loaded, keep_webp)
+    chosen = external or loaded.pages[page - 1]
+    if chosen.extension == ".gif":
+        external = cover_as_jpeg(chosen)
+    return page, external
+
+
+def _pick_cover(cover: Path | None, loaded: "_LoadedPages", keep_webp: bool):
     if cover is None:
         return 1, None
     path = Path(cover)
@@ -92,7 +101,7 @@ def _resolve_cover(cover: Path | None, page_of: dict[Path, int], keep_webp: bool
         raise EpubgenError(f"封面圖片不存在：{cover}")
     if not path.is_file() or path.suffix.lower() not in IMAGE_EXTENSIONS:
         raise EpubgenError(f"封面不是支援的圖片檔（JPEG、PNG、WebP、GIF）：{cover}")
-    page = page_of.get(path.resolve())
+    page = loaded.page_of.get(path.resolve())
     if page is not None:
         return page, None
     try:
