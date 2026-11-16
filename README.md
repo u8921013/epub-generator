@@ -14,7 +14,7 @@ pipx install .
 epubgen ./my-comic
 ```
 
-輸出 `my-comic.epub`，放在輸入資料夾旁邊。所有參數與預設值見 `epubgen --help`。
+輸出 `my-comic.epub`，放在輸入資料夾旁邊。所有參數與預設值見 `epubgen --help`，完整教學見 [docs/tutorial.md](docs/tutorial.md)。
 
 ## 開發與測試
 
