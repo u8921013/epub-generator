@@ -34,6 +34,23 @@ pipx ensurepath
 
 `pipx ensurepath` 之後要重新開一個終端機視窗，指令才會生效。
 
+如果 `brew install pipx` 之後還是出現 `pipx: command not found`，先確認它真的裝成功了：
+
+```bash
+brew list --versions pipx
+```
+
+沒有任何輸出，就代表沒裝成功，請重新執行 `brew install pipx` 並看輸出的錯誤訊息。Apple Silicon 的 Mac 如果同時裝了兩套 Homebrew（`/opt/homebrew` 與 `/usr/local`），可以用 `which -a brew` 確認，並改用原生的那一套：`/opt/homebrew/bin/brew install pipx`。
+
+不想用 Homebrew 的話，也可以直接用 Python 安裝 pipx（需要 Python 3.10 以上，用 `python3 --version` 確認）：
+
+```bash
+python3 -m pip install --user pipx
+python3 -m pipx ensurepath
+```
+
+然後重新開一個終端機視窗，再執行 `pipx install .`。如果連 pipx 都不想裝，也可以用 `python3 -m pip install --user .` 直接安裝，但要確認安裝位置有在 `PATH` 裡，所以我比較建議用 pipx。
+
 確認安裝成功：
 
 ```bash
