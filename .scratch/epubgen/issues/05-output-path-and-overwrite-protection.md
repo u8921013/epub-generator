@@ -6,7 +6,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] `-o <路徑>` 把 EPUB 寫到該路徑，成功訊息顯示的是該路徑
 - [x] 輸出檔已存在且沒有 `--force` 時：錯誤訊息寫到標準錯誤輸出、非零結束代碼、既有檔案內容不變

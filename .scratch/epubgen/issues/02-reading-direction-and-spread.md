@@ -6,7 +6,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 預設的 page progression direction 是 RTL
 - [x] `--direction ltr` 把 page progression direction 改成 LTR

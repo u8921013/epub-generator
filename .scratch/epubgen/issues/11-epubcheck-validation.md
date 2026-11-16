@@ -8,7 +8,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 環境有 EPUBCheck 時，測試會對產出的 EPUB 執行它，有任何錯誤就失敗，並在失敗訊息中顯示 EPUBCheck 的輸出
 - [x] 環境沒有 Java 或 EPUBCheck 時，這組測試被標示為跳過，其他測試照常執行

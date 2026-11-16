@@ -10,7 +10,7 @@
 
 **Blocked by:** 01、07
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 預設情況下，WebP 圖片在 EPUB 中是 JPEG，manifest 的 media type 與檔案內容一致
 - [x] 轉檔後該頁的 viewport 等於轉檔後圖片的像素尺寸

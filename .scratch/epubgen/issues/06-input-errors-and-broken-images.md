@@ -10,7 +10,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 輸入路徑不存在：錯誤訊息指出路徑，非零結束代碼
 - [x] 輸入路徑是檔案而不是資料夾：錯誤訊息說明原因，非零結束代碼

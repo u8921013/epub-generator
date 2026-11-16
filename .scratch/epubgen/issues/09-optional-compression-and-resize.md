@@ -10,7 +10,7 @@
 
 **Blocked by:** 08
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 沒給這兩個參數時，非 WebP 圖片的位元組與原檔完全相同
 - [x] 給了品質參數時，圖片被重新壓縮，輸出檔比不加參數時小

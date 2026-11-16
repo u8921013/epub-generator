@@ -9,7 +9,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 列出 Kobo 顯示 fixed layout EPUB 所需的具體設定（要加在哪份文件、寫什麼），每項附來源
 - [x] 說明這些設定與 Apple Books 是否衝突，同一份 EPUB 能否兩邊通用

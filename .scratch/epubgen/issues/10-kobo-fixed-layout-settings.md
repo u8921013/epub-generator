@@ -8,7 +8,7 @@
 
 **Blocked by:** 01、07
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 輸出的 EPUB 含有票 07 列出的每一項 Kobo 設定
 - [x] 這些設定在所有選項組合下都存在（至少涵蓋預設、`--direction ltr`、`--spread` 中已實作的部分）

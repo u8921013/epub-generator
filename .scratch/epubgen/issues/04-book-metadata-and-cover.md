@@ -11,7 +11,7 @@ spec 沒有明確決定的細節，採用它建議的做法：
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 書名參數會寫入 metadata，且預設輸出檔名改為 `<書名>.epub`
 - [x] 書名含檔名不允許的字元時，輸出檔名中這些字元被替換，metadata 的書名不變

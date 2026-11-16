@@ -10,7 +10,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] `pipx install .` 後可在任何目錄執行 `epubgen`
 - [x] `epubgen <資料夾>` 在輸入資料夾的同層目錄產生 `<資料夾名稱>.epub`，結束代碼為 0

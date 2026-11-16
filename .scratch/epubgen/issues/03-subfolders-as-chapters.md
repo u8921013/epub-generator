@@ -11,7 +11,7 @@ spec 沒有明確決定的兩個情況，採用它建議的做法：
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 每個含圖片的第一層子資料夾在 navigation document 中有一個項目，名稱等於子資料夾名稱
 - [x] 章節依子資料夾名稱自然排序

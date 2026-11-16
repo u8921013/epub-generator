@@ -11,7 +11,7 @@
 
 **Blocked by:** 02、03、04、08、10
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] Apple Books：兩本書都以固定版面開啟，圖片沒有被重排、切割或變形
 - [x] Apple Books：翻頁方向正確（RTL 的書往右翻到下一頁，LTR 相反）
