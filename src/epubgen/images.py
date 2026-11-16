@@ -4,7 +4,7 @@ import io
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageFile, ImageOps
 
 from .errors import BrokenImageError
 
@@ -26,31 +26,117 @@ class PageImage:
     height: int
 
 
-JPEG_QUALITY = 95  # 轉檔用的高品質設定
+JPEG_QUALITY = 95  # 沒有指定 --quality 時，轉檔或縮放後重新編碼用的高品質設定
 _WHITE = (255, 255, 255)
 
 
-def _to_jpeg(img: Image.Image) -> tuple[bytes, int, int]:
-    """把圖片轉成高品質 JPEG；帶透明度的圖合成到白底。回傳 (位元組, 寬, 高)。"""
+@dataclass(frozen=True)
+class ImageSettings:
+    """圖片處理選項。全部都是預設值時，只有 WebP 會被動到（轉成 JPEG）。"""
+
+    keep_webp: bool = False  # True：WebP 不轉成 JPEG
+    quality: int | None = None  # 重新壓縮的品質（1–100）；None 表示不主動重新壓縮
+    max_size: int | None = None  # 長邊的像素上限；None 表示不縮放
+
+
+def _flatten(img: Image.Image) -> Image.Image:
+    """帶透明度的圖合成到白底，其他模式轉成 RGB。"""
     has_alpha = img.mode in ("RGBA", "LA", "PA") or (
         img.mode == "P" and "transparency" in img.info
     )
-    if has_alpha:
-        rgba = img.convert("RGBA")
-        flat = Image.new("RGB", rgba.size, _WHITE)
-        flat.paste(rgba, mask=rgba.getchannel("A"))
-    else:
-        flat = img.convert("RGB")
+    if not has_alpha:
+        return img.convert("RGB")
+    rgba = img.convert("RGBA")
+    flat = Image.new("RGB", rgba.size, _WHITE)
+    flat.paste(rgba, mask=rgba.getchannel("A"))
+    return flat
+
+
+def _encode_jpeg(img: Image.Image, quality: int) -> tuple[bytes, int, int]:
+    flat = _flatten(img)
+    # optimize=True 時 libjpeg 要一次把整個輸出放進緩衝區；細節很多的大頁面會超過
+    # Pillow 預設的 64KB 而失敗（OSError: broken data stream），所以放寬到不可能超過的大小。
+    ImageFile.MAXBLOCK = max(ImageFile.MAXBLOCK, flat.width * flat.height * 3 + 65536)
     buffer = io.BytesIO()
-    flat.save(buffer, "JPEG", quality=JPEG_QUALITY, subsampling=0, optimize=True,
+    flat.save(buffer, "JPEG", quality=quality, subsampling=0, optimize=True,
               icc_profile=img.info.get("icc_profile"))
     return buffer.getvalue(), flat.width, flat.height
 
 
-def load_image(path: Path, name: str | None = None, keep_webp: bool = False) -> PageImage:
+def _to_jpeg(img: Image.Image) -> tuple[bytes, int, int]:
+    """把圖片轉成高品質 JPEG；帶透明度的圖合成到白底。回傳 (位元組, 寬, 高)。"""
+    return _encode_jpeg(img, JPEG_QUALITY)
+
+
+def _plan(suffix: str, size: tuple[int, int], settings: ImageSettings) -> str | None:
+    """決定這張圖要不要處理、處理後是什麼格式（"JPEG"、"PNG"、"WEBP"），None 表示原樣打包。
+
+    - JPEG：給了 quality 或超過上限時重新編碼成 JPEG。
+    - PNG：給了 quality 時轉成 JPEG；只有超過上限時縮小並維持 PNG（無損）。
+    - WebP：預設轉成 JPEG；keep_webp 時，需要處理才重新編碼成 WebP。
+    - GIF：只有超過上限時縮小並轉成 JPEG（動畫只留第一個畫格）；quality 不影響 GIF。
+    """
+    oversize = settings.max_size is not None and max(size) > settings.max_size
+    recompress = settings.quality is not None
+    if suffix == ".webp":
+        if not settings.keep_webp:
+            return "JPEG"
+        return "WEBP" if oversize or recompress else None
+    if suffix == ".gif":
+        return "JPEG" if oversize else None
+    if suffix in (".jpg", ".jpeg"):
+        return "JPEG" if oversize or recompress else None
+    if suffix == ".png":
+        if recompress:
+            return "JPEG"
+        return "PNG" if oversize else None
+    return None
+
+
+def _scaled(size: tuple[int, int], limit: int) -> tuple[int, int]:
+    ratio = limit / max(size)
+    return max(1, round(size[0] * ratio)), max(1, round(size[1] * ratio))
+
+
+def _render(img: Image.Image, fmt: str, settings: ImageSettings) -> tuple[PageImage, bool]:
+    """依 fmt 重新編碼。回傳 (圖片, 是否縮小過)。"""
+    img = ImageOps.exif_transpose(img)  # 重新編碼會丟掉 EXIF，所以先把方向轉正
+    resized = settings.max_size is not None and max(img.size) > settings.max_size
+    if resized:
+        if img.mode in ("P", "PA"):
+            img = img.convert("RGBA" if "transparency" in img.info or img.mode == "PA" else "RGB")
+        img = img.resize(_scaled(img.size, settings.max_size), Image.LANCZOS)
+    quality = settings.quality or JPEG_QUALITY
+    if fmt == "JPEG":
+        data, width, height = _encode_jpeg(img, quality)
+        return PageImage(data, ".jpg", MEDIA_TYPES[".jpg"], width, height), resized
+    buffer = io.BytesIO()
+    keep_alpha = img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info)
+    out = img.convert("RGBA" if keep_alpha else "RGB")
+    if fmt == "PNG":
+        out.save(buffer, "PNG", optimize=True, icc_profile=img.info.get("icc_profile"))
+        return PageImage(buffer.getvalue(), ".png", MEDIA_TYPES[".png"], *out.size), resized
+    out.save(buffer, "WEBP", quality=quality, icc_profile=img.info.get("icc_profile"))
+    return PageImage(buffer.getvalue(), ".webp", MEDIA_TYPES[".webp"], *out.size), resized
+
+
+def _keeps_original(suffix: str, fmt: str, resized: bool, new_size: int, old_size: int) -> bool:
+    """只重新壓縮（沒縮小、格式沒變）卻變得更大時，維持原檔：使用者要的是縮小檔案。
+
+    WebP 預設轉成 JPEG 是格式轉換，不適用這條。
+    """
+    same_format = (suffix in (".jpg", ".jpeg") and fmt == "JPEG") or (
+        suffix == ".webp" and fmt == "WEBP"
+    )
+    return same_format and not resized and new_size >= old_size
+
+
+def load_image(path: Path, name: str | None = None,
+               settings: ImageSettings = ImageSettings()) -> PageImage:
     """讀取並完整解碼圖片以確認沒有損毀。name 是錯誤訊息中顯示的檔名。
 
-    預設原樣保留檔案位元組；例外是 WebP 會轉成 JPEG（keep_webp=True 則保留）。
+    預設原樣保留檔案位元組；只有 WebP 預設會轉成 JPEG，其餘只有使用者給了
+    --quality 或 --max-size 才會重新編碼（規則見 _plan）。
     回傳的尺寸一律是最終放進 EPUB 的那張圖片。
     """
     name = name or path.name
@@ -60,19 +146,21 @@ def load_image(path: Path, name: str | None = None, keep_webp: bool = False) -> 
         with Image.open(path) as img:
             img.load()  # 完整解碼，才抓得到被截斷的檔案
             width, height = img.size
-            if suffix == ".webp" and not keep_webp:
-                data, width, height = _to_jpeg(img)
-                return PageImage(data, ".jpg", MEDIA_TYPES[".jpg"], width, height)
+            fmt = _plan(suffix, (width, height), settings)
+            if fmt is not None:
+                processed, resized = _render(img, fmt, settings)
+                if not _keeps_original(suffix, fmt, resized, len(processed.data), len(data)):
+                    return processed
     except Exception as exc:
         raise BrokenImageError(name) from exc
     extension = ".jpg" if suffix == ".jpeg" else suffix
     return PageImage(data, extension, MEDIA_TYPES[suffix], width, height)
 
 
-def cover_as_jpeg(page: PageImage) -> PageImage:
+def cover_as_jpeg(page: PageImage, quality: int | None = None) -> PageImage:
     """把 GIF 封面轉成 JPEG（Kobo 不支援 GIF 封面）。動畫只取第一個畫格，透明處合成到白底。"""
     with Image.open(io.BytesIO(page.data)) as img:
         img.seek(0)
         img.load()
-        data, width, height = _to_jpeg(img)
+        data, width, height = _encode_jpeg(img, quality or JPEG_QUALITY)
     return PageImage(data, ".jpg", MEDIA_TYPES[".jpg"], width, height)

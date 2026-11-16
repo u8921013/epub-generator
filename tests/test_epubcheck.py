@@ -57,6 +57,8 @@ SCENARIOS = {
     "metadata": (flat, ["--title", "A & B <x>", "--author", "某某", "--language", "ja"]),
     "special-characters": (special_characters, []),
     "gif-cover": (gif_first, []),
+    "quality-and-resize": (flat, ["--quality", "60", "--max-size", "400"]),
+    "resize-only": (flat, ["--max-size", "250"]),
     "webp-converted": (with_webp, []),
     "webp-kept": (with_webp, ["--keep-webp"]),
 }

@@ -22,6 +22,26 @@ def _language(value: str) -> str:
     return value
 
 
+def _quality(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        number = 0
+    if not 1 <= number <= 100:
+        raise argparse.ArgumentTypeError(f"品質要是 1 到 100 的整數，收到 {value!r}")
+    return number
+
+
+def _max_size(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        number = 0
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"尺寸上限要是正整數（像素），收到 {value!r}")
+    return number
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="epubgen",
@@ -71,6 +91,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--keep-webp", action="store_true",
         help="保留 WebP 原檔（預設：把 WebP 轉成高品質 JPEG，因為不是所有閱讀器都能顯示 WebP）",
     )
+    parser.add_argument(
+        "--quality", metavar="1-100", type=_quality,
+        help=("重新壓縮的 JPEG 品質（預設：不重新壓縮，圖片原樣打包）。JPEG 與 WebP 重新壓縮；"
+              "PNG 會轉成 JPEG；GIF 不受影響。壓縮後反而變大的 JPEG 會維持原檔"),
+    )
+    parser.add_argument(
+        "--max-size", metavar="PIXELS", type=_max_size,
+        help=("圖片長邊的像素上限（預設：不縮放）。超過的圖片等比例縮小，不會放大。"
+              "縮小後 JPEG 維持 JPEG、PNG 維持 PNG（無損）、GIF 與預設的 WebP 轉成 JPEG"),
+    )
     parser.add_argument("--version", action="version", version=f"epubgen {_version()}")
     return parser
 
@@ -82,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
             output=args.output, force=args.force, skip_broken=args.skip_broken,
             direction=args.direction, spread=args.spread, title=args.title,
             author=args.author, language=args.language, cover=args.cover,
-            keep_webp=args.keep_webp,
+            keep_webp=args.keep_webp, quality=args.quality, max_size=args.max_size,
         ))
     except EpubgenError as exc:
         print(f"epubgen: 錯誤：{exc}", file=sys.stderr)
