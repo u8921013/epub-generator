@@ -26,6 +26,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="epubgen",
         description="把圖片資料夾轉成 fixed layout 的漫畫 EPUB。",
+        epilog=(
+            "Kobo 說明：輸出的檔案以同時給 Apple Books 與 Kobo 使用為目標。把檔案側載到 Kobo "
+            "eInk 時，Kobo 官方規格說固定版面的書要用 .fxl.kepub.epub 副檔名才會以 Kobo "
+            "自己的引擎顯示（代價是停用書籤與筆記）；維持 .epub 是否也能以固定版面開啟，"
+            "官方沒有說明。若顯示不正常，可以先把檔名改成 .fxl.kepub.epub 再試。"
+        ),
     )
     parser.add_argument("input", help="放滿圖片的資料夾")
     parser.add_argument(

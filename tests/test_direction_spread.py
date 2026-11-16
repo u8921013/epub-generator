@@ -20,11 +20,10 @@ def build(comic, *args):
 
 
 def spread_roles(book):
-    """把每頁的 spread 標記簡化成 center / left / right / none。"""
+    """把每頁的 spread 標記簡化成 left / right / none（沒有標記）。"""
     out = []
     for props in spine_spread_properties(book):
-        roles = [p.removeprefix("rendition:page-spread-") for p in props
-                 if p.startswith("rendition:page-spread-")]
+        roles = [p.removeprefix("page-spread-") for p in props if p.startswith("page-spread-")]
         out.append(roles[0] if roles else "none")
     return out
 
@@ -70,27 +69,27 @@ def test_default_pages_are_not_merged_into_spreads(comic):
     assert spread_roles(book) == ["none"] * 5
 
 
-def test_spread_rtl_cover_alone_then_right_left_alternating(comic):
+def test_spread_rtl_cover_unmarked_then_right_left_alternating(comic):
     book = build(comic, "--spread")
     assert book.meta_property("rendition:spread") != "none"
-    assert spread_roles(book) == ["center", "right", "left", "right", "left"]
+    assert spread_roles(book) == ["none", "right", "left", "right", "left"]
 
 
-def test_spread_ltr_cover_alone_then_left_right_alternating(comic):
+def test_spread_ltr_cover_unmarked_then_left_right_alternating(comic):
     book = build(comic, "--spread", "--direction", "ltr")
-    assert spread_roles(book) == ["center", "left", "right", "left", "right"]
+    assert spread_roles(book) == ["none", "left", "right", "left", "right"]
 
 
 def test_spread_keeps_the_declared_direction(comic):
     assert spine_direction(build(comic, "--spread")) == "rtl"
 
 
-def test_spread_with_a_single_page_book_only_has_the_cover(tmp_path):
+def test_spread_with_a_single_page_book_has_no_left_or_right_mark(tmp_path):
     folder = tmp_path / "solo"
     folder.mkdir()
     make_image(folder / "1.jpg")
     assert main([str(folder), "--spread"]) == 0
-    assert spread_roles(Epub(tmp_path / "solo.epub")) == ["center"]
+    assert spread_roles(Epub(tmp_path / "solo.epub")) == ["none"]
 
 
 def test_spread_does_not_change_page_order_or_viewports(comic):

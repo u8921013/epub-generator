@@ -41,15 +41,22 @@ class BookSpec:
     external_cover: PageImage | None = None  # 不屬於任何頁面的封面圖；有的話優先於 cover_page
 
 
-def _spread_property(index: int, direction: str) -> str:
-    """雙頁模式下第 index 頁（從 1 起算）的左右頁標記。
+def _spread_property(index: int, direction: str) -> str | None:
+    """雙頁模式下第 index 頁（從 1 起算）的 spine 屬性；不需要標記時回傳 None。
 
-    封面單獨一頁；其後依閱讀方向交替：RTL 右頁在先，LTR 左頁在先。
+    封面不加任何標記：Kobo 規格建議第一個項目不要有跨頁屬性（iOS 會自行把
+    第一頁置中並單獨成頁），而它之後的頁面從下一個跨頁開始，所以封面自然單獨一頁。
+    其後依閱讀方向交替：RTL 右頁在先，LTR 左頁在先。
+
+    使用不帶 rendition: 前綴的 page-spread-left / page-spread-right：EPUB 3.3
+    認可它們（rendition: 版本是別名，較舊的閱讀系統可能只認得無前綴版本），
+    也是 Kobo 規格範例使用的寫法。
     """
     if index == 1:
-        return "center"
+        return None
     first, second = ("right", "left") if direction == "rtl" else ("left", "right")
-    return first if index % 2 == 0 else second
+    side = first if index % 2 == 0 else second
+    return f"page-spread-{side}"
 
 
 def _page_xhtml(index: int, page: PageImage, title: str) -> str:
@@ -108,9 +115,8 @@ def _package_opf(book: BookSpec, identifier: str, modified: str) -> str:
             f'    <item id="page-{i:04d}" href="pages/page-{i:04d}.xhtml"'
             f' media-type="application/xhtml+xml"/>'
         )
-        props = ""
-        if book.spread:
-            props = f' properties="rendition:page-spread-{_spread_property(i, book.direction)}"'
+        spread_property = _spread_property(i, book.direction) if book.spread else None
+        props = f' properties="{spread_property}"' if spread_property else ""
         spine.append(f'    <itemref idref="page-{i:04d}"{props}/>')
     if book.external_cover is not None:
         cover = book.external_cover

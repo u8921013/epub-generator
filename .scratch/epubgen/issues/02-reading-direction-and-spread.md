@@ -16,3 +16,8 @@
 - [x] `--spread` 且 LTR 時，封面之後的頁面依序標記為左、右、左、右…
 - [x] `--help` 顯示這兩個參數與預設值
 - [x] 以上行為都有透過 CLI 進入點的測試
+
+## Comments
+
+票 10 調整了雙頁模式的標記寫法（行為上封面仍單獨一頁、其後右左／左右交替）：封面不再有 `rendition:page-spread-center`，其餘頁面改用不帶前綴的 `page-spread-left` / `page-spread-right`。原因與依據見票 10 與票 07。
+
