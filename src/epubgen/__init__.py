@@ -51,6 +51,7 @@ class BuildResult:
     skipped: tuple[str, ...] = ()  # 被 skip_broken 跳過的圖片檔名
     kind: BookKind = BookKind.COMIC
     chapter_count: int = 0  # 文字書的章數
+    warnings: tuple[str, ...] = ()  # 文字書的警告，每項為「檔名：原因」
 
 
 def build_epub(input_dir: Path, options: BuildOptions = BuildOptions()) -> BuildResult:
@@ -104,12 +105,18 @@ def _reject_comic_only_options(options: BuildOptions) -> None:
 
 def _build_text_book(input_dir: Path, folder: Path, title: str, destination: Path, options: BuildOptions) -> BuildResult:
     chapters = []
+    warnings = []
     for part_title, source in scan_text_book(folder).chapters_in_reading_order():
+        name = source.relative_to(folder).as_posix()
         try:
             text = source.read_text(encoding="utf-8-sig")
         except (OSError, UnicodeDecodeError) as exc:
-            raise EpubgenError(f"無法讀取 Markdown 檔（需要 UTF-8）：{source.relative_to(folder)}") from exc
+            raise EpubgenError(f"無法讀取 Markdown 檔（需要 UTF-8）：{name}") from exc
         rendered = render_markdown(text)
+        warnings.extend(f"{name}：{reason}" for reason in rendered.warnings)
+        if rendered.is_empty:
+            warnings.append(f"{name}：沒有內容（空檔案或只有 front matter），已略過")
+            continue
         chapters.append(TextChapter(title=rendered.title or source.stem, body=rendered.body, part=part_title))
     if not chapters:
         raise EpubgenError(f"資料夾裡沒有任何有內容的章：{input_dir}")
@@ -117,7 +124,7 @@ def _build_text_book(input_dir: Path, folder: Path, title: str, destination: Pat
                         author=options.author)
     _write_atomically(lambda tmp: write_text_epub(book, tmp), destination, options.force)
     return BuildResult(output=destination, page_count=0, kind=BookKind.TEXT,
-                       chapter_count=len(chapters))
+                       chapter_count=len(chapters), warnings=tuple(warnings))
 
 
 def _build_comic(input_dir: Path, folder: Path, title: str, destination: Path, options: BuildOptions,

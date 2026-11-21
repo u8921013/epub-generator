@@ -72,6 +72,14 @@ def text_parts(folder):
     make_image(folder / "插圖" / "1.jpg")
 
 
+def text_warnings(folder):
+    (folder / "1.md").write_text(
+        "---\ntitle: x\n---\n# 第1章\n\n<div class=\"a\">\n<p>區塊 &nbsp; HTML</p>\n</div>\n\n"
+        "文 <span>行內</span> <br> <!-- 註解 --> &copy;。\n", encoding="utf-8")
+    (folder / "2.md").write_text("", encoding="utf-8")
+    (folder / "3.md").write_text("---\na: 1\n---\n", encoding="utf-8")
+
+
 SCENARIOS = {
     "basic": (flat, []),
     "ltr": (flat, ["--direction", "ltr"]),
@@ -89,6 +97,7 @@ SCENARIOS = {
     "webp-kept": (with_webp, ["--keep-webp"]),
     "text-simple": (text_simple, ["--author", "某某"]),
     "text-parts": (text_parts, []),
+    "text-warnings": (text_warnings, []),
 }
 
 

@@ -4,10 +4,12 @@
 換成書內的 href。
 """
 
+import re
 from dataclasses import dataclass
 from typing import Protocol
 
 from markdown_it import MarkdownIt
+from markdown_it.common.utils import escapeHtml
 from markdown_it.token import Token
 
 
@@ -25,17 +27,61 @@ class TargetResolver(Protocol):
 class RenderedChapter:
     title: str  # 第一個一級標題的純文字；沒有時為空字串，由呼叫端退回檔名
     body: str  # 章的 XHTML 內文片段（可能有多個最上層元素）
+    is_empty: bool = False  # 略過 front matter 後沒有任何內容
+    warnings: tuple[str, ...] = ()  # 給作者看的原因，不含檔名（由呼叫端加上）
+
+
+# 開頭 `---` 單獨一行、到下一個單獨一行的 `---` 為止；沒有結束行就不算 front matter。
+_FRONT_MATTER = re.compile(r"\A---[ \t]*\r?\n(?:.*?\r?\n)?---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 
 
 def _parser() -> MarkdownIt:
-    # html=False：原始 HTML 一律轉義成文字；xhtmlOut：空元素以 <br /> 形式輸出。
-    return MarkdownIt("commonmark", {"html": False, "xhtmlOut": True})
+    # html=True 只是為了認出原始 HTML 好發出警告；輸出時由下面的規則轉義成文字。
+    # xhtmlOut：空元素以 <br /> 形式輸出。
+    md = MarkdownIt("commonmark", {"html": True, "xhtmlOut": True})
+    md.add_render_rule("html_block", _escaped_html_block)
+    md.add_render_rule("html_inline", _escaped_html_inline)
+    return md
+
+
+def _escaped_html_block(self, tokens: list[Token], idx: int, options, env) -> str:
+    # 保留原本的換行，閱讀器才不會把整段 HTML 併成一行。
+    lines = tokens[idx].content.strip().split("\n")
+    return "<p>" + "<br />\n".join(escapeHtml(line) for line in lines) + "</p>\n"
+
+
+def _escaped_html_inline(self, tokens: list[Token], idx: int, options, env) -> str:
+    return escapeHtml(tokens[idx].content)
 
 
 def render_markdown(text: str, resolver: TargetResolver | None = None) -> RenderedChapter:
     md = _parser()
-    tokens = md.parse(text)
-    return RenderedChapter(title=_first_h1_text(tokens), body=md.renderer.render(tokens, md.options, {}))
+    front_matter = _FRONT_MATTER.match(text)
+    skipped_lines = front_matter.group().count("\n") if front_matter else 0
+    tokens = md.parse(text[front_matter.end():] if front_matter else text)
+    warnings = []
+    html_lines = [line + skipped_lines for line in _raw_html_lines(tokens)]
+    if html_lines:
+        lines = "、".join(str(n) for n in sorted(set(html_lines)))
+        warnings.append(f"原始 HTML 已轉義成純文字（第 {lines} 行）")
+    return RenderedChapter(title=_first_h1_text(tokens), body=md.renderer.render(tokens, md.options, {}),
+                           is_empty=not tokens, warnings=tuple(warnings))
+
+
+def _raw_html_lines(tokens: list[Token]) -> list[int]:
+    """原始 HTML 出現的行號（從 1 起算，相對於傳給解析器的文字）。"""
+    lines = []
+    for token in tokens:
+        if token.type == "html_block" and token.map:
+            lines.append(token.map[0] + 1)
+        elif token.type == "inline" and token.map:
+            line = token.map[0] + 1
+            for child in token.children or ():
+                if child.type in ("softbreak", "hardbreak"):
+                    line += 1
+                elif child.type == "html_inline":
+                    lines.append(line)
+    return lines
 
 
 def _first_h1_text(tokens: list[Token]) -> str:

@@ -228,3 +228,56 @@ def test_hidden_subfolders_do_not_become_parts(tmp_path):
     write_md(folder / ".notes" / "x.md", "# 筆記\n")
     book = build(folder)
     assert book.toc() == [("甲", 1, chapter_path(1))]
+
+
+# --- 警告、front matter、空章、原始 HTML ----------------------------------------
+
+def test_a_book_without_warnings_prints_nothing_to_stderr(novel, capsys):
+    build(novel)
+    assert capsys.readouterr().err == ""
+
+
+def test_front_matter_is_left_out_of_the_book(tmp_path):
+    folder = tmp_path / "pages"
+    write_md(folder / "a.md", "---\ntitle: 網站標題\nlayout: post\n---\n# 第1章\n\n正文。\n")
+    book = build(folder)
+    assert book.toc() == [("第1章", 1, chapter_path(1))]
+    text = book.chapter_body_text(chapter_path(1))
+    assert "網站標題" not in text and "layout" not in text
+    assert "正文。" in text
+
+
+def test_empty_chapters_are_skipped_with_warnings_listed_at_the_end(tmp_path, capsys):
+    folder = tmp_path / "pages"
+    write_md(folder / "1.md", "# 甲\n")
+    write_md(folder / "2.md", "")
+    write_md(folder / "上" / "3.md", "---\ntitle: x\n---\n")
+    write_md(folder / "上" / "4.md", "# 乙\n")
+    book = build(folder)
+    assert book.toc() == [("甲", 1, chapter_path(1)), ("上", 1, chapter_path(2)), ("乙", 2, chapter_path(2))]
+    captured = capsys.readouterr()
+    assert "共 2 章" in captured.out
+    header, *warnings = captured.err.splitlines()
+    assert "2 則警告" in header
+    assert len(warnings) == 2
+    assert "2.md" in warnings[0] and "沒有內容" in warnings[0]
+    assert "上/3.md" in warnings[1] and "沒有內容" in warnings[1]
+
+
+def test_a_folder_of_only_empty_chapters_is_an_error(tmp_path, capsys):
+    folder = tmp_path / "pages"
+    write_md(folder / "1.md", "\n\n")
+    write_md(folder / "2.md", "---\na: 1\n---\n")
+    assert main([str(folder)]) == 1
+    assert "沒有任何有內容的章" in capsys.readouterr().err
+    assert list(tmp_path.iterdir()) == [folder]
+
+
+def test_raw_html_is_shown_as_text_and_warned_about_with_the_file_name(tmp_path, capsys):
+    folder = tmp_path / "pages"
+    write_md(folder / "a.md", "# 甲\n\n<div>區塊</div>\n\n文 <span>行內</span>。\n")
+    book = build(folder)
+    text = book.chapter_body_text(chapter_path(1))
+    assert "<div>區塊</div>" in text and "<span>行內</span>" in text
+    err = capsys.readouterr().err
+    assert "a.md" in err and "原始 HTML" in err and "第 3、5 行" in err

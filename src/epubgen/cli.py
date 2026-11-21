@@ -123,6 +123,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"epubgen: 已跳過 {len(result.skipped)} 張無法讀取的圖片：", file=sys.stderr)
         for name in result.skipped:
             print(f"  - {name}", file=sys.stderr)
+    if result.warnings:
+        print(f"epubgen: 有 {len(result.warnings)} 則警告：", file=sys.stderr)
+        for warning in result.warnings:
+            print(f"  - {warning}", file=sys.stderr)
     if result.kind is BookKind.TEXT:
         print(f"已輸出：{result.output}（共 {result.chapter_count} 章）")
     else:
