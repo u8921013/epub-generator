@@ -4,7 +4,7 @@ import argparse
 import sys
 from importlib.metadata import PackageNotFoundError, version
 
-from . import COMIC_DEFAULT_DIRECTION, BuildOptions, EpubgenError, build_epub
+from . import COMIC_DEFAULT_DIRECTION, BookKind, BuildOptions, EpubgenError, build_epub
 from .metadata import is_valid_language
 from .epub import DIRECTIONS
 
@@ -121,7 +121,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"epubgen: 已跳過 {len(result.skipped)} 張無法讀取的圖片：", file=sys.stderr)
         for name in result.skipped:
             print(f"  - {name}", file=sys.stderr)
-    print(f"已輸出：{result.output}（共 {result.page_count} 頁）")
+    if result.kind is BookKind.TEXT:
+        print(f"已輸出：{result.output}（共 {result.chapter_count} 章）")
+    else:
+        print(f"已輸出：{result.output}（共 {result.page_count} 頁）")
     return 0
 
 

@@ -1,21 +1,31 @@
-"""epubgen：把圖片資料夾轉成 fixed layout 的漫畫 EPUB。"""
+"""epubgen：把資料夾轉成 EPUB。圖片資料夾產生 fixed layout 的漫畫書，
+Markdown 資料夾產生 reflowable 的文字書（見 ADR 0001）。"""
 
+import enum
 import os
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .epub import DIRECTIONS, BookSpec, TocEntry, write_epub
+from .epub import (DIRECTIONS, BookSpec, TextBookSpec, TextChapter, TocEntry, write_epub,
+                   write_text_epub)
 from .errors import BrokenImageError, EpubgenError
 from .layout import page_viewports
 from .images import ImageSettings, PageImage, cover_as_jpeg, load_image
 from .metadata import is_valid_language, safe_file_name
-from .scan import IMAGE_EXTENSIONS, Book, scan_book
+from .markdown import render_markdown
+from .scan import IMAGE_EXTENSIONS, Book, is_text_book, scan_book, scan_text_book
 
 DEFAULT_LANGUAGE = "zh-TW"
 COMIC_DEFAULT_DIRECTION = "rtl"
 
-__all__ = ["build_epub", "BuildOptions", "BuildResult", "EpubgenError"]
+__all__ = ["build_epub", "BookKind", "BuildOptions", "BuildResult", "EpubgenError"]
+
+
+class BookKind(enum.Enum):
+    COMIC = "漫畫書"
+    TEXT = "文字書"
 
 
 @dataclass(frozen=True)
@@ -37,8 +47,10 @@ class BuildOptions:
 @dataclass(frozen=True)
 class BuildResult:
     output: Path
-    page_count: int
+    page_count: int  # 漫畫書的頁數；文字書為 0
     skipped: tuple[str, ...] = ()  # 被 skip_broken 跳過的圖片檔名
+    kind: BookKind = BookKind.COMIC
+    chapter_count: int = 0  # 文字書的章數
 
 
 def build_epub(input_dir: Path, options: BuildOptions = BuildOptions()) -> BuildResult:
@@ -70,6 +82,31 @@ def build_epub(input_dir: Path, options: BuildOptions = BuildOptions()) -> Build
     destination = Path(destination)
     _check_destination(destination, options.force)
 
+    if is_text_book(folder):
+        return _build_text_book(input_dir, folder, title, destination, options)
+    return _build_comic(input_dir, folder, title, destination, options, direction)
+
+
+def _build_text_book(input_dir: Path, folder: Path, title: str, destination: Path, options: BuildOptions) -> BuildResult:
+    chapters = []
+    for source in scan_text_book(folder):
+        try:
+            text = source.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise EpubgenError(f"無法讀取 Markdown 檔（需要 UTF-8）：{source.relative_to(folder)}") from exc
+        rendered = render_markdown(text)
+        chapters.append(TextChapter(title=rendered.title or source.stem, body=rendered.body))
+    if not chapters:
+        raise EpubgenError(f"資料夾裡沒有任何有內容的章：{input_dir}")
+    book = TextBookSpec(title=title, language=options.language, chapters=tuple(chapters),
+                        author=options.author)
+    _write_atomically(lambda tmp: write_text_epub(book, tmp), destination, options.force)
+    return BuildResult(output=destination, page_count=0, kind=BookKind.TEXT,
+                       chapter_count=len(chapters))
+
+
+def _build_comic(input_dir: Path, folder: Path, title: str, destination: Path, options: BuildOptions,
+                 direction: str) -> BuildResult:
     scanned = scan_book(folder)
     if not scanned.pages:
         raise EpubgenError(f"資料夾裡沒有可用的圖片：{input_dir}")
@@ -86,7 +123,7 @@ def build_epub(input_dir: Path, options: BuildOptions = BuildOptions()) -> Build
         author=options.author, cover_page=cover_page, external_cover=external_cover,
         viewports=tuple(page_viewports(loaded.pages)),
     )
-    _write_atomically(book, destination, options.force)
+    _write_atomically(lambda tmp: write_epub(book, tmp), destination, options.force)
     return BuildResult(output=destination, page_count=len(loaded.pages),
                        skipped=tuple(loaded.skipped))
 
@@ -166,7 +203,7 @@ def _check_destination(destination: Path, force: bool) -> None:
         raise EpubgenError(f"輸出檔已存在：{destination}（要覆蓋請加上 --force）")
 
 
-def _write_atomically(book: BookSpec, destination: Path, force: bool) -> None:
+def _write_atomically(write: Callable[[Path], None], destination: Path, force: bool) -> None:
     try:
         fd, tmp_name = tempfile.mkstemp(suffix=".epub.tmp", dir=destination.parent)
     except OSError as exc:
@@ -178,7 +215,7 @@ def _write_atomically(book: BookSpec, destination: Path, force: bool) -> None:
     os.umask(umask)
     os.chmod(tmp, 0o666 & ~umask)
     try:
-        write_epub(book, tmp)
+        write(tmp)
         _check_destination(destination, force)  # 寫入期間目標可能被別人建立
         os.replace(tmp, destination)
     except OSError as exc:

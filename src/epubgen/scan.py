@@ -1,4 +1,7 @@
-"""書籍掃描：讀取輸入資料夾，產出「書 → 章 → 頁」的結構。"""
+"""書籍掃描：判斷書的種類，並讀取輸入資料夾產出書的結構。
+
+漫畫書是「書 → 章 → 頁」；文字書是「書 → 章」，每個 Markdown 檔是一章。
+"""
 
 import os
 import re
@@ -6,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+MARKDOWN_EXTENSIONS = {".md", ".markdown"}
 
 
 @dataclass(frozen=True)
@@ -64,3 +68,26 @@ def scan_book(folder: Path) -> Book:
         if pages:
             chapters.append(Chapter(title=sub.name, pages=pages))
     return Book(front_pages=front, chapters=chapters)
+
+
+def _is_markdown(path: Path) -> bool:
+    """非隱藏的 Markdown 檔；隱藏檔（例如 macOS 的 ._x.md）不算。"""
+    return path.suffix.lower() in MARKDOWN_EXTENSIONS and not path.name.startswith(".")
+
+
+def is_text_book(folder: Path) -> bool:
+    """資料夾任何位置有 Markdown 檔就是文字書，否則是漫畫書（ADR 0001）。
+
+    隱藏資料夾（例如 .git）裡的檔案不算。
+    """
+    for _root, dirs, names in os.walk(folder):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        if any(_is_markdown(Path(name)) for name in names):
+            return True
+    return False
+
+
+def scan_text_book(folder: Path) -> list[Path]:
+    """文字書的章（Markdown 檔），依檔名自然排序。"""
+    return sorted((p for p in folder.iterdir() if p.is_file() and _is_markdown(p)),
+                  key=lambda p: natural_key(p.name))

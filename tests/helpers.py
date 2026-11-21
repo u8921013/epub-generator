@@ -77,6 +77,23 @@ class Epub:
                       self.page_text(page_path))
         return int(m.group(1)), int(m.group(2))
 
+    def viewport_or_none(self, page_path: str):
+        """有 viewport 時回傳 (寬, 高)，沒有時回傳 None（文字書）。"""
+        return self.viewport(page_path) if 'name="viewport"' in self.page_text(page_path) else None
+
+    def chapter_root(self, chapter_path: str) -> ET.Element:
+        """把章的 XHTML 解析成 XML（解析失敗即代表不是格式正確的 XHTML）。"""
+        return ET.fromstring(self.zip.read(chapter_path))
+
+    def chapter_body_text(self, chapter_path: str) -> str:
+        """章 <body> 的純文字。"""
+        body = self.chapter_root(chapter_path).find("x:body", NS)
+        return "".join(body.itertext())
+
+    def chapter_headings(self, chapter_path: str, tag: str) -> list:
+        """章內某一級標題（例如 "h1"）的純文字，依出現順序。"""
+        return ["".join(h.itertext()) for h in self.chapter_root(chapter_path).iter("{%s}%s" % (NS["x"], tag))]
+
     def meta_property(self, prop: str):
         for m in self.opf.findall(".//opf:metadata/opf:meta", NS):
             if m.get("property") == prop:

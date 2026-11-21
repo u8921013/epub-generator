@@ -1,4 +1,7 @@
-"""EPUB 組裝：產生 package document、navigation document、每頁 XHTML 並打包。"""
+"""EPUB 組裝：產生 package document、navigation document 與內容文件並打包。
+
+漫畫書是 fixed layout（每頁一個 XHTML）；文字書是 reflowable（每章一個 XHTML）。
+"""
 
 import uuid
 import zipfile
@@ -89,11 +92,15 @@ def _page_xhtml(index: int, page: PageImage, title: str, viewport: tuple[int, in
 
 
 def _nav_xhtml(book: BookSpec) -> str:
-    title, language = book.title, book.language
-    entries = book.chapters or (TocEntry(title, 1),)
+    entries = book.chapters or (TocEntry(book.title, 1),)
+    return _nav_document(book.title, book.language,
+                         [(e.title, f"pages/page-{e.page:04d}.xhtml") for e in entries])
+
+
+def _nav_document(title: str, language: str, entries: list[tuple[str, str]]) -> str:
+    """navigation document；entries 是 (目錄文字, 相對 nav.xhtml 的 href)。"""
     items = "".join(
-        f'      <li><a href="pages/page-{e.page:04d}.xhtml">{escape(e.title)}</a></li>\n'
-        for e in entries
+        f'      <li><a href={quoteattr(href)}>{escape(text)}</a></li>\n' for text, href in entries
     )
     return (
         XML_DECL
@@ -133,41 +140,124 @@ def _package_opf(book: BookSpec, identifier: str, modified: str) -> str:
             f'    <item id="cover-image" href="images/cover{cover.extension}"'
             f' media-type="{cover.media_type}" properties="cover-image"/>'
         )
-    creator = f"    <dc:creator>{escape(book.author)}</dc:creator>\n" if book.author else ""
+    rendition = ('    <meta property="rendition:layout">pre-paginated</meta>\n'
+                 + f'    <meta property="rendition:spread">{"landscape" if book.spread else "none"}</meta>\n')
+    return _package_document(book.title, book.author, book.language, identifier, modified,
+                             rendition, manifest, spine, book.direction)
+
+
+def _package_document(title: str, author: str | None, language: str, identifier: str, modified: str,
+                      extra_meta: str, manifest: list[str], spine: list[str], direction: str) -> str:
+    """package document 的共通外框：metadata、manifest、spine。"""
+    creator = f"    <dc:creator>{escape(author)}</dc:creator>\n" if author else ""
     return (
         XML_DECL
         + '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">\n'
         + '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n'
         + f'    <dc:identifier id="book-id">{identifier}</dc:identifier>\n'
-        + f"    <dc:title>{escape(book.title)}</dc:title>\n"
+        + f"    <dc:title>{escape(title)}</dc:title>\n"
         + creator
-        + f"    <dc:language>{escape(book.language)}</dc:language>\n"
+        + f"    <dc:language>{escape(language)}</dc:language>\n"
         + f'    <meta property="dcterms:modified">{modified}</meta>\n'
-        + '    <meta property="rendition:layout">pre-paginated</meta>\n'
-        + f'    <meta property="rendition:spread">{"landscape" if book.spread else "none"}</meta>\n'
+        + extra_meta
         + "  </metadata>\n"
         + "  <manifest>\n" + "\n".join(manifest) + "\n  </manifest>\n"
-        + f'  <spine page-progression-direction="{book.direction}">\n' + "\n".join(spine) + "\n  </spine>\n"
+        + f'  <spine page-progression-direction="{direction}">\n' + "\n".join(spine) + "\n  </spine>\n"
         + "</package>\n"
     )
 
 
 def write_epub(book: BookSpec, destination: Path) -> None:
+    identifier, modified = _new_identity()
+    viewports = book.viewports or [(p.width, p.height) for p in book.pages]
+    files: list[tuple[str, str | bytes, int]] = [
+        ("OEBPS/content.opf", _package_opf(book, identifier, modified), zipfile.ZIP_DEFLATED),
+        ("OEBPS/nav.xhtml", _nav_xhtml(book), zipfile.ZIP_DEFLATED),
+    ]
+    for i, page in enumerate(book.pages, start=1):
+        files.append((f"OEBPS/pages/page-{i:04d}.xhtml",
+                      _page_xhtml(i, page, book.title, viewports[i - 1]), zipfile.ZIP_DEFLATED))
+        files.append((f"OEBPS/images/img-{i:04d}{page.extension}", page.data, zipfile.ZIP_STORED))
+    if book.external_cover is not None:
+        files.append((f"OEBPS/images/cover{book.external_cover.extension}",
+                      book.external_cover.data, zipfile.ZIP_STORED))
+    _write_zip(destination, files)
+
+
+# --- 文字書（reflowable） ------------------------------------------------------
+
+@dataclass(frozen=True)
+class TextChapter:
+    title: str  # 章名，用於目錄與 <title>
+    body: str  # 章的 XHTML 內文片段
+
+
+@dataclass(frozen=True)
+class TextBookSpec:
+    title: str
+    language: str
+    chapters: tuple[TextChapter, ...]
+    author: str | None = None
+
+
+def _chapter_href(index: int) -> str:
+    """第 index 章（從 1 起算）相對 OEBPS 的路徑；檔名依閱讀順序編號，與來源檔名無關。"""
+    return f"text/chapter-{index:04d}.xhtml"
+
+
+def _chapter_xhtml(chapter: TextChapter, language: str) -> str:
+    return (
+        XML_DECL
+        + '<!DOCTYPE html>\n'
+        + f'<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"'
+        + f' lang={quoteattr(language)} xml:lang={quoteattr(language)}>\n'
+        + f"<head>\n  <meta charset=\"utf-8\"/>\n  <title>{escape(chapter.title)}</title>\n</head>\n"
+        + "<body>\n"
+        + chapter.body
+        + "</body>\n"
+        + "</html>\n"
+    )
+
+
+def _text_package_opf(book: TextBookSpec, identifier: str, modified: str) -> str:
+    manifest = ['    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>']
+    spine = []
+    for i, _chapter in enumerate(book.chapters, start=1):
+        manifest.append(f'    <item id="chapter-{i:04d}" href="{_chapter_href(i)}"'
+                        f' media-type="application/xhtml+xml"/>')
+        spine.append(f'    <itemref idref="chapter-{i:04d}"/>')
+    # 不宣告 rendition:layout，預設即為 reflowable。
+    return _package_document(book.title, book.author, book.language, identifier, modified,
+                             "", manifest, spine, "ltr")
+
+
+def write_text_epub(book: TextBookSpec, destination: Path) -> None:
+    identifier, modified = _new_identity()
+    nav = _nav_document(book.title, book.language,
+                        [(c.title, _chapter_href(i)) for i, c in enumerate(book.chapters, start=1)])
+    files: list[tuple[str, str | bytes, int]] = [
+        ("OEBPS/content.opf", _text_package_opf(book, identifier, modified), zipfile.ZIP_DEFLATED),
+        ("OEBPS/nav.xhtml", nav, zipfile.ZIP_DEFLATED),
+    ]
+    for i, chapter in enumerate(book.chapters, start=1):
+        files.append((f"OEBPS/{_chapter_href(i)}", _chapter_xhtml(chapter, book.language),
+                      zipfile.ZIP_DEFLATED))
+    _write_zip(destination, files)
+
+
+# --- 共通 ----------------------------------------------------------------------
+
+def _new_identity() -> tuple[str, str]:
+    """每次產生的書都有新的識別碼與修改時間。"""
     identifier = f"urn:uuid:{uuid.uuid4()}"
     modified = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return identifier, modified
+
+
+def _write_zip(destination: Path, files: list[tuple[str, str | bytes, int]]) -> None:
+    """打包 EPUB：mimetype 放第一個且不壓縮，其後是 container 與各檔案。"""
     with zipfile.ZipFile(destination, "w") as z:
         z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
         z.writestr("META-INF/container.xml", CONTAINER_XML, compress_type=zipfile.ZIP_DEFLATED)
-        z.writestr("OEBPS/content.opf", _package_opf(book, identifier, modified),
-                   compress_type=zipfile.ZIP_DEFLATED)
-        z.writestr("OEBPS/nav.xhtml", _nav_xhtml(book),
-                   compress_type=zipfile.ZIP_DEFLATED)
-        viewports = book.viewports or [(p.width, p.height) for p in book.pages]
-        for i, page in enumerate(book.pages, start=1):
-            z.writestr(f"OEBPS/pages/page-{i:04d}.xhtml", _page_xhtml(i, page, book.title, viewports[i - 1]),
-                       compress_type=zipfile.ZIP_DEFLATED)
-            z.writestr(f"OEBPS/images/img-{i:04d}{page.extension}", page.data,
-                       compress_type=zipfile.ZIP_STORED)
-        if book.external_cover is not None:
-            z.writestr(f"OEBPS/images/cover{book.external_cover.extension}",
-                       book.external_cover.data, compress_type=zipfile.ZIP_STORED)
+        for name, data, compression in files:
+            z.writestr(name, data, compress_type=compression)

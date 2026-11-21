@@ -53,6 +53,12 @@ def special_characters(folder):
     make_image(folder / "A&B <1>" / "2.jpg", size=(300, 500))
 
 
+def text_simple(folder):
+    (folder / "8096_1.md").write_text("# 第1章 開端\n\n第一段 **粗體**，A & B < C。\n", encoding="utf-8")
+    (folder / "8096_2.md").write_text("沒有標題的一章。\n\n---\n\n第二段  \n硬換行。\n", encoding="utf-8")
+    (folder / "8096_10.md").write_text("# 第10章\n\n## 小標\n\n內容。\n", encoding="utf-8")
+
+
 SCENARIOS = {
     "basic": (flat, []),
     "ltr": (flat, ["--direction", "ltr"]),
@@ -68,6 +74,7 @@ SCENARIOS = {
     "resize-only": (flat, ["--max-size", "250"]),
     "webp-converted": (with_webp, []),
     "webp-kept": (with_webp, ["--keep-webp"]),
+    "text-simple": (text_simple, ["--author", "某某"]),
 }
 
 
