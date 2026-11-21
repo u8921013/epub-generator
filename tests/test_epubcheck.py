@@ -72,6 +72,14 @@ def text_parts(folder):
     make_image(folder / "插圖" / "1.jpg")
 
 
+def text_rich(folder):
+    (folder / "1.md").write_text(
+        "# 表格與程式碼\n\n今天天氣很好，\n我們去散步。English\nwords ~~刪除~~。\n\n"
+        "| 名稱 | 數量 |\n|:--|--:|\n| A&B | <3> |\n\n"
+        "```python\ndef f(x):\n    return x < 1 and x & 2\n```\n\n"
+        "    縮排程式碼\n\n> 引用\n>\n> - 清單\n\n1. 一\n2. 二\n\n***\n", encoding="utf-8")
+
+
 def text_warnings(folder):
     (folder / "1.md").write_text(
         "---\ntitle: x\n---\n# 第1章\n\n<div class=\"a\">\n<p>區塊 &nbsp; HTML</p>\n</div>\n\n"
@@ -98,6 +106,7 @@ SCENARIOS = {
     "text-simple": (text_simple, ["--author", "某某"]),
     "text-parts": (text_parts, []),
     "text-warnings": (text_warnings, []),
+    "text-rich": (text_rich, []),
 }
 
 

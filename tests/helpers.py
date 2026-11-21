@@ -85,6 +85,17 @@ class Epub:
         """把章的 XHTML 解析成 XML（解析失敗即代表不是格式正確的 XHTML）。"""
         return ET.fromstring(self.zip.read(chapter_path))
 
+    def stylesheet_paths(self) -> list:
+        """manifest 裡所有 CSS 的 zip 內路徑。"""
+        return [self.resolve(i.get("href")) for i in self.manifest().values() if i.get("media-type") == "text/css"]
+
+    def stylesheets(self, chapter_path: str) -> list:
+        """章 <head> 引用的樣式表，換成 zip 內的路徑。"""
+        head = self.chapter_root(chapter_path).find("x:head", NS)
+        base = chapter_path.rpartition("/")[0]
+        return [self.resolve(link.get("href"), base) for link in head.findall("x:link", NS)
+                if link.get("rel") == "stylesheet"]
+
     def chapter_body_text(self, chapter_path: str) -> str:
         """章 <body> 的純文字。"""
         body = self.chapter_root(chapter_path).find("x:body", NS)

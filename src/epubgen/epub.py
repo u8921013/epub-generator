@@ -225,13 +225,32 @@ def _chapter_href(index: int) -> str:
     return f"text/chapter-{index:04d}.xhtml"
 
 
+_STYLESHEET_HREF = "styles/book.css"
+
+# 只排版面結構；字型、字級、行距都交給閱讀器設定，也不嵌入任何字型。
+_STYLESHEET = """\
+p { margin: 0.5em 0; }
+h1, h2, h3, h4, h5, h6 { line-height: 1.3; margin: 1.2em 0 0.6em; page-break-after: avoid; }
+blockquote { margin: 1em 0 1em 1em; padding-left: 0.8em; border-left: 0.2em solid #999; }
+ul, ol { margin: 0.5em 0; padding-left: 1.5em; }
+pre { font-family: monospace; white-space: pre-wrap; overflow-wrap: break-word; margin: 1em 0;
+      padding: 0.5em; border: 1px solid #ccc; }
+code { font-family: monospace; }
+table { border-collapse: collapse; margin: 1em 0; }
+th, td { border: 1px solid #999; padding: 0.25em 0.5em; }
+img { max-width: 100%; height: auto; }
+hr { margin: 1.5em 0; }
+"""
+
+
 def _chapter_xhtml(chapter: TextChapter, language: str) -> str:
     return (
         XML_DECL
         + '<!DOCTYPE html>\n'
         + f'<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"'
         + f' lang={quoteattr(language)} xml:lang={quoteattr(language)}>\n'
-        + f"<head>\n  <meta charset=\"utf-8\"/>\n  <title>{escape(chapter.title)}</title>\n</head>\n"
+        + f"<head>\n  <meta charset=\"utf-8\"/>\n  <title>{escape(chapter.title)}</title>\n"
+        + f'  <link rel="stylesheet" type="text/css" href="../{_STYLESHEET_HREF}"/>\n</head>\n'
         + "<body>\n"
         + chapter.body
         + "</body>\n"
@@ -240,7 +259,8 @@ def _chapter_xhtml(chapter: TextChapter, language: str) -> str:
 
 
 def _text_package_opf(book: TextBookSpec, identifier: str, modified: str) -> str:
-    manifest = ['    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>']
+    manifest = ['    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>',
+                f'    <item id="css" href="{_STYLESHEET_HREF}" media-type="text/css"/>']
     spine = []
     for i, _chapter in enumerate(book.chapters, start=1):
         manifest.append(f'    <item id="chapter-{i:04d}" href="{_chapter_href(i)}"'
@@ -273,6 +293,7 @@ def write_text_epub(book: TextBookSpec, destination: Path) -> None:
     files: list[tuple[str, str | bytes, int]] = [
         ("OEBPS/content.opf", _text_package_opf(book, identifier, modified), zipfile.ZIP_DEFLATED),
         ("OEBPS/nav.xhtml", nav, zipfile.ZIP_DEFLATED),
+        (f"OEBPS/{_STYLESHEET_HREF}", _STYLESHEET, zipfile.ZIP_DEFLATED),
     ]
     for i, chapter in enumerate(book.chapters, start=1):
         files.append((f"OEBPS/{_chapter_href(i)}", _chapter_xhtml(chapter, book.language),

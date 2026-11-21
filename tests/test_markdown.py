@@ -2,6 +2,8 @@
 
 import xml.etree.ElementTree as ET
 
+import pytest
+
 from epubgen.markdown import render_markdown
 
 
@@ -107,3 +109,123 @@ def test_an_escaped_html_block_keeps_its_line_breaks():
     root = parse(render_markdown("<div>\n<p>甲</p>\n</div>\n", NoTargets()).body)
     paragraph = root.find("{http://www.w3.org/1999/xhtml}p")
     assert len(paragraph.findall("{http://www.w3.org/1999/xhtml}br")) == 2
+
+
+# --- 軟換行 ----------------------------------------------------------------------
+
+def paragraph_text(markdown: str) -> str:
+    root = parse(render_markdown(markdown, NoTargets()).body)
+    return "".join(root.find("{http://www.w3.org/1999/xhtml}p").itertext())
+
+
+def test_a_soft_break_between_chinese_characters_joins_them():
+    assert paragraph_text("今天天氣很好，\n我們去散步。\n") == "今天天氣很好，我們去散步。"
+
+
+def test_a_soft_break_between_english_words_becomes_whitespace():
+    assert paragraph_text("hello\nworld\n").split() == ["hello", "world"]
+
+
+@pytest.mark.parametrize("before, after", [
+    ("中", "A"),   # 中英交界：一邊不是中日韓 → 照標準
+    ("A", "中"),
+    ("中", "1"),
+    ("，", "a"),
+    ("中", "한"),  # 韓文以空白分詞，不相連
+    ("한", "국"),
+    ("中", "😀"),
+])
+def test_a_soft_break_keeps_whitespace_unless_both_sides_are_cjk(before, after):
+    text = paragraph_text(f"{before}\n{after}\n")
+    assert text != before + after and text.split() == [before, after]
+
+
+@pytest.mark.parametrize("before, after", [
+    ("一", "鿿"),          # 中日韓統一表意文字
+    ("㐀", "䶿"),          # 擴充 A
+    ("\U00020000", "\U0003134a"),  # 擴充 B 以後（第二、第三平面）
+    ("豈", "﫿"),          # 相容表意文字
+    ("、", "〿"),          # 中日韓符號與標點（、。「」）
+    ("ぁ", "ヿ"),          # 平假名、片假名
+    ("ㄅ", "ㆿ"),          # 注音符號
+    ("！", "｠"),          # 全形 ASCII 與全形括號（，！？）
+    ("｡", "ﾟ"),          # 半形中日標點與半形片假名
+    ("︰", "﹏"),          # 相容形式（直排標點）
+])
+def test_unicode_ranges_that_count_as_cjk_are_joined_at_their_edges(before, after):
+    assert paragraph_text(f"{before}\n{after}\n") == before + after
+
+
+def test_the_cjk_rule_looks_through_inline_formatting():
+    assert paragraph_text("很**好**\n`我們`去\n") == "很好我們去"
+
+
+def test_a_multi_line_setext_title_joins_cjk_lines():
+    assert render_markdown("第一\n章\n===\n", NoTargets()).title == "第一章"
+
+
+def test_hard_breaks_are_unaffected():
+    root = parse(render_markdown("中文  \n中文\n", NoTargets()).body)
+    assert root.find(".//{http://www.w3.org/1999/xhtml}br") is not None
+
+
+# --- 區塊與 GFM -------------------------------------------------------------------
+
+X = "{http://www.w3.org/1999/xhtml}"
+
+
+def test_tables_become_xhtml_tables():
+    root = parse(render_markdown("| 名稱 | 數量 |\n|:--|--:|\n| 蘋果 | 3 |\n| 香蕉 | 10 |\n", NoTargets()).body)
+    table = root.find(f"{X}table")
+    assert ["".join(th.itertext()) for th in table.iter(f"{X}th")] == ["名稱", "數量"]
+    assert [["".join(td.itertext()) for td in tr.iter(f"{X}td")] for tr in table.find(f"{X}tbody")] == [
+        ["蘋果", "3"], ["香蕉", "10"]]
+
+
+def test_strikethrough_is_rendered():
+    root = parse(render_markdown("這是 ~~刪掉~~ 的字。\n", NoTargets()).body)
+    assert root.find(f".//{X}s").text == "刪掉"
+
+
+def test_code_blocks_keep_indentation_and_line_breaks_without_joining_cjk():
+    code = "def 函式():\n    中文\n    文字 < 1 & 2\n"
+    for markdown in (f"```python\n{code}```\n", "".join(f"    {line}\n" for line in code.splitlines())):
+        root = parse(render_markdown(markdown, NoTargets()).body)
+        pre = root.find(f"{X}pre")
+        assert "".join(pre.find(f"{X}code").itertext()) == code
+
+
+def test_quotes_lists_and_horizontal_rules_follow_commonmark():
+    root = parse(render_markdown("> 引用\n\n- 甲\n- 乙\n\n1. 一\n2. 二\n\n***\n", NoTargets()).body)
+    assert "".join(root.find(f"{X}blockquote").itertext()).strip() == "引用"
+    assert ["".join(li.itertext()) for li in root.find(f"{X}ul")] == ["甲", "乙"]
+    assert ["".join(li.itertext()) for li in root.find(f"{X}ol")] == ["一", "二"]
+    assert root.find(f"{X}hr") is not None
+
+
+@pytest.mark.parametrize("markdown, expected", [
+    ("中文\n“引號”\n", "中文“引號”"),
+    ("他說“好。”\n“走吧。”\n", "他說“好。”“走吧。”"),
+    ("等等……\n他說\n", "等等……他說"),
+    ("前\n——後\n", "前——後"),
+    ("約翰·\n史密斯\n", "約翰·史密斯"),
+    ("小\n﹐字\n", "小﹐字"),           # 小寫變體
+    ("か\n\U0001b001\n", "か\U0001b001"),     # 假名補充
+    ("中&#x6587;\n字\n", "中文字"),              # 字元參照仍是文字
+])
+def test_punctuation_shared_with_western_text_joins_when_it_sits_in_cjk_text(markdown, expected):
+    assert paragraph_text(markdown) == expected
+
+
+@pytest.mark.parametrize("markdown", [
+    "He said “hi”\n“there”\n",
+    "wait…\n…then\n",
+    "“”\n“”\n",
+])
+def test_punctuation_shared_with_western_text_keeps_whitespace_in_western_text(markdown):
+    assert "\n" in paragraph_text(markdown)
+
+
+def test_an_image_or_raw_html_next_to_a_soft_break_keeps_the_whitespace():
+    assert "\n" in paragraph_text("中文![圖](a.png)\n中文\n")
+    assert paragraph_text("中文<b>\n中文\n") == "中文<b>\n中文"

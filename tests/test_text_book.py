@@ -281,3 +281,22 @@ def test_raw_html_is_shown_as_text_and_warned_about_with_the_file_name(tmp_path,
     assert "<div>區塊</div>" in text and "<span>行內</span>" in text
     err = capsys.readouterr().err
     assert "a.md" in err and "原始 HTML" in err and "第 3、5 行" in err
+
+
+# --- 內建樣式 --------------------------------------------------------------------
+
+def test_every_chapter_links_the_built_in_stylesheet_listed_in_the_manifest(novel):
+    book = build(novel)
+    css = book.stylesheet_paths()
+    assert len(css) == 1
+    for chapter in book.page_paths():
+        assert book.stylesheets(chapter) == css
+    style = book.zip.read(css[0]).decode("utf-8")
+    assert "table" in style and "pre" in style and "max-width: 100%" in style
+
+
+def test_no_fonts_are_embedded(novel):
+    book = build(novel)
+    assert not [n for n in book.zip.namelist() if n.lower().endswith((".ttf", ".otf", ".woff", ".woff2"))]
+    assert not [i for i in book.manifest().values() if "font" in i.get("media-type")]
+    assert all("@font-face" not in book.zip.read(css).decode("utf-8") for css in book.stylesheet_paths())
