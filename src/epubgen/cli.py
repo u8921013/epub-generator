@@ -4,7 +4,7 @@ import argparse
 import sys
 from importlib.metadata import PackageNotFoundError, version
 
-from . import BuildOptions, EpubgenError, build_epub
+from . import COMIC_DEFAULT_DIRECTION, BuildOptions, EpubgenError, build_epub
 from .metadata import is_valid_language
 from .epub import DIRECTIONS
 
@@ -55,8 +55,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("input", help="放滿圖片的資料夾")
     parser.add_argument(
-        "--direction", choices=DIRECTIONS, default="rtl",
-        help="翻頁方向：rtl 從右到左、ltr 從左到右（預設：rtl）",
+        "--direction", choices=DIRECTIONS,
+        help=f"翻頁方向：rtl 從右到左、ltr 從左到右（漫畫書預設：{COMIC_DEFAULT_DIRECTION}）",
     )
     parser.add_argument(
         "--spread", action="store_true",

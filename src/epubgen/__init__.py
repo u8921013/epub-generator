@@ -13,6 +13,7 @@ from .metadata import is_valid_language, safe_file_name
 from .scan import IMAGE_EXTENSIONS, Book, scan_book
 
 DEFAULT_LANGUAGE = "zh-TW"
+COMIC_DEFAULT_DIRECTION = "rtl"
 
 __all__ = ["build_epub", "BuildOptions", "BuildResult", "EpubgenError"]
 
@@ -22,7 +23,7 @@ class BuildOptions:
     output: Path | None = None  # 預設：輸入資料夾旁邊的 <書名>.epub
     force: bool = False  # 輸出檔已存在時是否覆蓋
     skip_broken: bool = False  # 跳過損毀的圖片，而不是報錯
-    direction: str = "rtl"  # 翻頁方向，"rtl" 或 "ltr"
+    direction: str | None = None  # 翻頁方向，"rtl" 或 "ltr"；None 表示未指定，依書的種類套用預設（漫畫書 rtl）
     spread: bool = False  # 雙頁模式
     title: str | None = None  # 預設：輸入資料夾名稱
     author: str | None = None
@@ -47,8 +48,9 @@ def build_epub(input_dir: Path, options: BuildOptions = BuildOptions()) -> Build
     成功後才移到目標路徑，失敗時不留下半成品。
     圖片損毀時預設報錯，options.skip_broken 則跳過並記錄在結果的 skipped。
     """
-    if options.direction not in DIRECTIONS:
+    if options.direction is not None and options.direction not in DIRECTIONS:
         raise EpubgenError(f"不合法的翻頁方向：{options.direction}（可用：{', '.join(DIRECTIONS)}）")
+    direction = COMIC_DEFAULT_DIRECTION if options.direction is None else options.direction
     if options.quality is not None and not 1 <= options.quality <= 100:
         raise EpubgenError(f"不合法的品質：{options.quality}（要在 1 到 100 之間）")
     if options.max_size is not None and options.max_size < 1:
@@ -80,7 +82,7 @@ def build_epub(input_dir: Path, options: BuildOptions = BuildOptions()) -> Build
 
     book = BookSpec(
         title=title, language=options.language, pages=loaded.pages,
-        direction=options.direction, spread=options.spread, chapters=tuple(loaded.toc),
+        direction=direction, spread=options.spread, chapters=tuple(loaded.toc),
         author=options.author, cover_page=cover_page, external_cover=external_cover,
         viewports=tuple(page_viewports(loaded.pages)),
     )

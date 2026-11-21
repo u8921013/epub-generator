@@ -1,5 +1,6 @@
 import pytest
 
+from epubgen import build_epub
 from epubgen.cli import main
 from tests.helpers import Epub, make_image, spine_direction, spine_spread_properties
 
@@ -30,8 +31,14 @@ def spread_roles(book):
 
 # --- 閱讀方向 -----------------------------------------------------------------
 
-def test_default_direction_is_right_to_left(comic):
+def test_comic_without_direction_defaults_to_right_to_left(comic):
+    """CLI 不給 --direction 時是「未指定」，由建書流程替漫畫書套用 RTL。"""
     assert spine_direction(build(comic)) == "rtl"
+
+
+def test_build_epub_with_default_options_makes_a_right_to_left_comic(comic):
+    result = build_epub(comic)
+    assert spine_direction(Epub(result.output)) == "rtl"
 
 
 def test_direction_ltr_changes_page_progression(comic):
@@ -109,3 +116,10 @@ def test_help_lists_direction_and_spread_with_defaults(capsys):
     assert "--direction" in out
     assert "rtl" in out and "ltr" in out
     assert "--spread" in out
+
+
+def test_help_still_says_comics_default_to_right_to_left(capsys):
+    with pytest.raises(SystemExit):
+        main(["--help"])
+    out = " ".join(capsys.readouterr().out.split())
+    assert "漫畫書預設：rtl" in out

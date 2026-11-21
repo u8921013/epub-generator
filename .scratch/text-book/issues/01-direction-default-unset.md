@@ -8,11 +8,11 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] CLI 不給 `--direction` 時，建書流程收到「未指定」，漫畫書套用 RTL
-- [ ] 漫畫書不帶 `--direction` 時輸出仍是 RTL（新增一條測試明確鎖住這點）
-- [ ] `--direction ltr` 與 `--direction rtl` 的行為不變
-- [ ] 直接呼叫建書函式、不指定方向時，漫畫書仍是 RTL
-- [ ] `--help` 仍顯示漫畫書的預設方向是 rtl
-- [ ] 既有測試全部通過，EPUBCheck 情境沒有錯誤
+- [x] CLI 不給 `--direction` 時，建書流程收到「未指定」，漫畫書套用 RTL
+- [x] 漫畫書不帶 `--direction` 時輸出仍是 RTL（新增一條測試明確鎖住這點）
+- [x] `--direction ltr` 與 `--direction rtl` 的行為不變
+- [x] 直接呼叫建書函式、不指定方向時，漫畫書仍是 RTL
+- [x] `--help` 仍顯示漫畫書的預設方向是 rtl
+- [x] 既有測試全部通過，EPUBCheck 情境沒有錯誤
