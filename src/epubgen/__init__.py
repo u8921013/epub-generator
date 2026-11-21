@@ -104,13 +104,13 @@ def _reject_comic_only_options(options: BuildOptions) -> None:
 
 def _build_text_book(input_dir: Path, folder: Path, title: str, destination: Path, options: BuildOptions) -> BuildResult:
     chapters = []
-    for source in scan_text_book(folder):
+    for part_title, source in scan_text_book(folder).chapters_in_reading_order():
         try:
             text = source.read_text(encoding="utf-8-sig")
         except (OSError, UnicodeDecodeError) as exc:
             raise EpubgenError(f"無法讀取 Markdown 檔（需要 UTF-8）：{source.relative_to(folder)}") from exc
         rendered = render_markdown(text)
-        chapters.append(TextChapter(title=rendered.title or source.stem, body=rendered.body))
+        chapters.append(TextChapter(title=rendered.title or source.stem, body=rendered.body, part=part_title))
     if not chapters:
         raise EpubgenError(f"資料夾裡沒有任何有內容的章：{input_dir}")
     book = TextBookSpec(title=title, language=options.language, chapters=tuple(chapters),

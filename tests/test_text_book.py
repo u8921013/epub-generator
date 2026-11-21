@@ -53,15 +53,6 @@ def test_markdown_extensions_are_case_insensitive_and_other_files_are_ignored(tm
     assert [text for text, _ in book.nav_links()] == ["甲", "乙"]
 
 
-def test_markdown_only_in_a_subfolder_still_makes_a_text_book(tmp_path):
-    folder = tmp_path / "pages"
-    make_image(folder / "1.jpg")
-    write_md(folder / "deep" / "er" / "x.md", "# 甲\n")
-    # 依 ADR 0001 是文字書；子資料夾的章（部）在 ticket 04 實作，目前沒有可用的章。
-    assert main([str(folder)]) == 1
-    assert not (tmp_path / "pages.epub").exists()
-
-
 # --- 章與章名 -----------------------------------------------------------------
 
 def test_each_markdown_file_is_one_chapter_with_a_generated_file_name(tmp_path):
@@ -184,3 +175,56 @@ def test_comic_only_flag_error_comes_before_the_existing_output_error(novel, cap
     assert main([str(novel), "--spread"]) == 1
     assert "只對漫畫書有效" in capsys.readouterr().err
     assert (novel.parent / "pages.epub").read_bytes() == b"old"
+
+
+# --- 部與兩層目錄 ---------------------------------------------------------------
+
+def chapter_path(n):
+    return f"OEBPS/text/chapter-{n:04d}.xhtml"
+
+
+@pytest.fixture
+def parted(tmp_path):
+    folder = tmp_path / "pages"
+    write_md(folder / "序.md", "# 序\n")
+    write_md(folder / "第10部" / "a.md", "# 十之一\n")
+    write_md(folder / "第2部" / "x_10.md", "# 二之十\n")
+    write_md(folder / "第2部" / "x_2.md", "# 二之二\n")
+    write_md(folder / "第2部" / "深" / "更深" / "y.md", "# 二之深\n")
+    make_image(folder / "插圖" / "1.jpg")
+    return folder
+
+
+def test_first_level_subfolders_become_parts_in_a_two_level_toc(parted):
+    book = build(parted)
+    assert book.toc() == [
+        ("序", 1, chapter_path(1)),
+        ("第2部", 1, chapter_path(2)),
+        ("二之二", 2, chapter_path(2)),
+        ("二之十", 2, chapter_path(3)),
+        ("二之深", 2, chapter_path(4)),
+        ("第10部", 1, chapter_path(5)),
+        ("十之一", 2, chapter_path(5)),
+    ]
+
+
+def test_spine_follows_the_reading_order_of_the_whole_book(parted):
+    book = build(parted)
+    assert book.page_paths() == [chapter_path(n) for n in range(1, 6)]
+    assert [book.chapter_headings(p, "h1")[0] for p in book.page_paths()] == [
+        "序", "二之二", "二之十", "二之深", "十之一"]
+
+
+def test_markdown_only_in_subfolders_makes_a_book_of_parts(tmp_path):
+    folder = tmp_path / "pages"
+    write_md(folder / "上" / "1.md", "# 甲\n")
+    book = build(folder)
+    assert book.toc() == [("上", 1, chapter_path(1)), ("甲", 2, chapter_path(1))]
+
+
+def test_hidden_subfolders_do_not_become_parts(tmp_path):
+    folder = tmp_path / "pages"
+    write_md(folder / "a.md", "# 甲\n")
+    write_md(folder / ".notes" / "x.md", "# 筆記\n")
+    book = build(folder)
+    assert book.toc() == [("甲", 1, chapter_path(1))]

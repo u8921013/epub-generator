@@ -59,6 +59,19 @@ def text_simple(folder):
     (folder / "8096_10.md").write_text("# 第10章\n\n## 小標\n\n內容。\n", encoding="utf-8")
 
 
+def text_parts(folder):
+    def md(rel, text):
+        path = folder / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    md("序.md", "# 序\n\n前言。\n")
+    md("第2部 A&B/1.md", "# 第1章\n\n內容。\n")
+    md("第2部 A&B/深/2.md", "# 第2章 <x>\n\n內容。\n")
+    md("第10部/1.md", "沒有標題。\n")
+    make_image(folder / "插圖" / "1.jpg")
+
+
 SCENARIOS = {
     "basic": (flat, []),
     "ltr": (flat, ["--direction", "ltr"]),
@@ -75,6 +88,7 @@ SCENARIOS = {
     "webp-converted": (with_webp, []),
     "webp-kept": (with_webp, ["--keep-webp"]),
     "text-simple": (text_simple, ["--author", "某某"]),
+    "text-parts": (text_parts, []),
 }
 
 

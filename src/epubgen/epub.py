@@ -3,6 +3,7 @@
 漫畫書是 fixed layout（每頁一個 XHTML）；文字書是 reflowable（每章一個 XHTML）。
 """
 
+import itertools
 import uuid
 import zipfile
 from dataclasses import dataclass
@@ -94,14 +95,32 @@ def _page_xhtml(index: int, page: PageImage, title: str, viewport: tuple[int, in
 def _nav_xhtml(book: BookSpec) -> str:
     entries = book.chapters or (TocEntry(book.title, 1),)
     return _nav_document(book.title, book.language,
-                         [(e.title, f"pages/page-{e.page:04d}.xhtml") for e in entries])
+                         [NavEntry(e.title, f"pages/page-{e.page:04d}.xhtml") for e in entries])
 
 
-def _nav_document(title: str, language: str, entries: list[tuple[str, str]]) -> str:
-    """navigation document；entries 是 (目錄文字, 相對 nav.xhtml 的 href)。"""
-    items = "".join(
-        f'      <li><a href={quoteattr(href)}>{escape(text)}</a></li>\n' for text, href in entries
-    )
+@dataclass(frozen=True)
+class NavEntry:
+    text: str
+    href: str  # 相對 nav.xhtml
+    children: tuple["NavEntry", ...] = ()  # 第二層項目
+
+
+def _nav_items(entries: "list[NavEntry] | tuple[NavEntry, ...]", indent: str) -> str:
+    """目錄的 <li> 項目；有子項目時內嵌一層 <ol>。"""
+    out = ""
+    for e in entries:
+        link = f"<a href={quoteattr(e.href)}>{escape(e.text)}</a>"
+        if e.children:
+            out += (f"{indent}<li>{link}\n{indent}  <ol>\n"
+                    + _nav_items(e.children, indent + "    ")
+                    + f"{indent}  </ol>\n{indent}</li>\n")
+        else:
+            out += f"{indent}<li>{link}</li>\n"
+    return out
+
+
+def _nav_document(title: str, language: str, entries: list[NavEntry]) -> str:
+    """navigation document；項目可以有一層子項目（文字書的部 → 章）。"""
     return (
         XML_DECL
         + '<!DOCTYPE html>\n'
@@ -110,7 +129,7 @@ def _nav_document(title: str, language: str, entries: list[tuple[str, str]]) -> 
         + f"<head>\n  <meta charset=\"utf-8\"/>\n  <title>{escape(title)}</title>\n</head>\n"
         + "<body>\n"
         + '  <nav epub:type="toc" id="toc">\n'
-        + f"    <ol>\n{items}    </ol>\n"
+        + f"    <ol>\n{_nav_items(entries, '      ')}    </ol>\n"
         + "  </nav>\n"
         + "</body>\n"
         + "</html>\n"
@@ -190,6 +209,7 @@ def write_epub(book: BookSpec, destination: Path) -> None:
 class TextChapter:
     title: str  # 章名，用於目錄與 <title>
     body: str  # 章的 XHTML 內文片段
+    part: str | None = None  # 所屬的部；None 表示根目錄的章
 
 
 @dataclass(frozen=True)
@@ -231,10 +251,25 @@ def _text_package_opf(book: TextBookSpec, identifier: str, modified: str) -> str
                              "", manifest, spine, "ltr")
 
 
+def _text_toc(chapters: tuple[TextChapter, ...]) -> list[NavEntry]:
+    """根目錄的章是第一層項目；每部是第一層項目並指向該部第一章，其章是第二層項目。
+
+    chapters 依閱讀順序排列，同一部的章彼此相鄰。
+    """
+    entries = [(c.part, NavEntry(c.title, _chapter_href(i))) for i, c in enumerate(chapters, start=1)]
+    toc: list[NavEntry] = []
+    for part, group in itertools.groupby(entries, key=lambda e: e[0]):
+        members = [entry for _part, entry in group]
+        if part is None:
+            toc += members
+        else:
+            toc.append(NavEntry(part, members[0].href, tuple(members)))
+    return toc
+
+
 def write_text_epub(book: TextBookSpec, destination: Path) -> None:
     identifier, modified = _new_identity()
-    nav = _nav_document(book.title, book.language,
-                        [(c.title, _chapter_href(i)) for i, c in enumerate(book.chapters, start=1)])
+    nav = _nav_document(book.title, book.language, _text_toc(book.chapters))
     files: list[tuple[str, str | bytes, int]] = [
         ("OEBPS/content.opf", _text_package_opf(book, identifier, modified), zipfile.ZIP_DEFLATED),
         ("OEBPS/nav.xhtml", nav, zipfile.ZIP_DEFLATED),

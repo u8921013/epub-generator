@@ -108,13 +108,33 @@ class Epub:
         return [i for i in self.manifest().values()
                 if "cover-image" in (i.get("properties") or "").split()]
 
-    def nav_links(self) -> list:
-        """回傳 navigation document 的 toc 連結 [(文字, 解析後路徑)]。"""
+    def _nav(self):
         nav_item = next(i for i in self.manifest().values()
                         if "nav" in (i.get("properties") or "").split())
         nav_path = self.resolve(nav_item.get("href"))
-        root = ET.fromstring(self.zip.read(nav_path))
-        base = nav_path.rpartition("/")[0]
+        return ET.fromstring(self.zip.read(nav_path)), nav_path.rpartition("/")[0]
+
+    def toc(self) -> list:
+        """回傳目錄項目 [(文字, 層級, 解析後路徑)]，層級從 1 起算，依出現順序。"""
+        root, base = self._nav()
+        toc_ol = root.find(".//x:nav/x:ol", NS)
+        entries = []
+
+        def walk(ol, level):
+            for li in ol.findall("x:li", NS):
+                a = li.find("x:a", NS)
+                entries.append(("".join(a.itertext()), level,
+                                self.resolve(a.get("href").split("#")[0], base)))
+                child = li.find("x:ol", NS)
+                if child is not None:
+                    walk(child, level + 1)
+
+        walk(toc_ol, 1)
+        return entries
+
+    def nav_links(self) -> list:
+        """回傳 navigation document 的 toc 連結 [(文字, 解析後路徑)]。"""
+        root, base = self._nav()
         links = []
         for a in root.iter("{%s}a" % NS["x"]):
             href = a.get("href").split("#")[0]
