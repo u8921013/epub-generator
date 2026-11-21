@@ -45,7 +45,8 @@ def _max_size(value: str) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="epubgen",
-        description="把圖片資料夾轉成 fixed layout 的漫畫 EPUB。",
+        description=("把資料夾轉成 EPUB：只有圖片的資料夾產生 fixed layout 的漫畫書；"
+                     "含有 Markdown 檔（.md、.markdown）的資料夾產生文字可重排的文字書。"),
         epilog=(
             "Kobo 說明：輸出的檔案以同時給 Apple Books 與 Kobo 使用為目標。把檔案側載到 Kobo "
             "eInk 時，Kobo 官方規格說固定版面的書要用 .fxl.kepub.epub 副檔名才會以 Kobo "
@@ -53,14 +54,15 @@ def build_parser() -> argparse.ArgumentParser:
             "官方沒有說明。若顯示不正常，可以先把檔名改成 .fxl.kepub.epub 再試。"
         ),
     )
-    parser.add_argument("input", help="放滿圖片的資料夾")
+    parser.add_argument("input", help="放滿圖片或 Markdown 檔的資料夾")
     parser.add_argument(
         "--direction", choices=DIRECTIONS,
-        help=f"翻頁方向：rtl 從右到左、ltr 從左到右（漫畫書預設：{COMIC_DEFAULT_DIRECTION}）",
+        help=(f"翻頁方向：rtl 從右到左、ltr 從左到右（漫畫書預設：{COMIC_DEFAULT_DIRECTION}）。"
+              "只對漫畫書有效"),
     )
     parser.add_argument(
         "--spread", action="store_true",
-        help="啟用雙頁模式：封面單獨一頁，其後兩兩並排（預設：每頁單獨顯示）",
+        help="啟用雙頁模式：封面單獨一頁，其後兩兩並排（預設：每頁單獨顯示）。只對漫畫書有效",
     )
     parser.add_argument(
         "-o", "--output", metavar="PATH",

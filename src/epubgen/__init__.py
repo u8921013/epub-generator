@@ -75,6 +75,10 @@ def build_epub(input_dir: Path, options: BuildOptions = BuildOptions()) -> Build
     if not folder.is_dir():
         raise EpubgenError(f"輸入路徑不是資料夾：{input_dir}")
 
+    text_book = is_text_book(folder)
+    if text_book:
+        _reject_comic_only_options(options)
+
     title = folder.name if options.title is None else options.title.strip()
     if not title:
         raise EpubgenError("書名不可為空")
@@ -82,9 +86,20 @@ def build_epub(input_dir: Path, options: BuildOptions = BuildOptions()) -> Build
     destination = Path(destination)
     _check_destination(destination, options.force)
 
-    if is_text_book(folder):
+    if text_book:
         return _build_text_book(input_dir, folder, title, destination, options)
     return _build_comic(input_dir, folder, title, destination, options, direction)
+
+
+def _reject_comic_only_options(options: BuildOptions) -> None:
+    """--direction 與 --spread 只對漫畫書有效；用在文字書時報錯，而不是默默忽略（ADR 0001）。"""
+    used = []
+    if options.direction is not None:
+        used.append("--direction")
+    if options.spread:
+        used.append("--spread")
+    if used:
+        raise EpubgenError(f"{'、'.join(used)} 只對漫畫書有效，不能用在文字書（Markdown 資料夾）")
 
 
 def _build_text_book(input_dir: Path, folder: Path, title: str, destination: Path, options: BuildOptions) -> BuildResult:

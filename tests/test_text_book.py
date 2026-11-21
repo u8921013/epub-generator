@@ -158,3 +158,29 @@ def test_markdown_inside_a_hidden_folder_does_not_turn_a_comic_into_a_text_book(
     write_md(folder / ".git" / "README.md", "# 不是書\n")
     assert main([str(folder)]) == 0
     assert spine_direction(Epub(tmp_path / "comic.epub")) == "rtl"
+
+
+# --- 漫畫專用旗標 ---------------------------------------------------------------
+
+@pytest.mark.parametrize("flags", [["--direction", "rtl"], ["--direction", "ltr"], ["--spread"]])
+def test_comic_only_flags_are_rejected_for_a_text_book(novel, capsys, flags):
+    assert main([str(novel), *flags]) == 1
+    err = capsys.readouterr().err
+    assert flags[0] in err
+    assert "只對漫畫書有效" in err
+    assert not (novel.parent / "pages.epub").exists()
+
+
+def test_help_mentions_markdown_folders_and_comic_only_flags(capsys):
+    with pytest.raises(SystemExit):
+        main(["--help"])
+    out = " ".join(capsys.readouterr().out.split())
+    assert "圖片或 Markdown 檔的資料夾" in out
+    assert out.count("只對漫畫書有效") >= 2
+
+
+def test_comic_only_flag_error_comes_before_the_existing_output_error(novel, capsys):
+    (novel.parent / "pages.epub").write_bytes(b"old")
+    assert main([str(novel), "--spread"]) == 1
+    assert "只對漫畫書有效" in capsys.readouterr().err
+    assert (novel.parent / "pages.epub").read_bytes() == b"old"
