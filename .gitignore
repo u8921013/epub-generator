@@ -8,3 +8,6 @@ device-test/
 # 本機的小說資料與抓取腳本（有著作權，不進版本控制）
 pages/
 test_novel.py
+
+# 產生出來的書（輸出檔，不進版本控制）
+*.epub
