@@ -537,13 +537,13 @@ def test_skip_broken_shows_alt_text_and_lists_skipped_illustrations(tmp_path, ca
 
 def test_an_encoded_nul_in_an_illustration_path_is_a_missing_illustration(tmp_path, capsys):
     folder = tmp_path / "pages"
-    write_md(folder / "a.md", "# 甲\n\n前![壞圖](a%00b.png)後\n")
+    write_md(folder / "a.md", "# 甲\n\n前![壞圖](a%00b.png)後 ![又一次](a%00b.png)\n")
     assert main([str(folder)]) == 1
     err = capsys.readouterr().err
     assert "找不到插圖" in err and "--skip-broken" in err and "Traceback" not in err
     assert not (tmp_path / "pages.epub").exists()
     book = build(folder, "--skip-broken")
-    assert "前壞圖後" in book.chapter_body_text(chapter_path(1))
+    assert "前壞圖後 又一次" in book.chapter_body_text(chapter_path(1))
     assert "已跳過 1 張" in capsys.readouterr().err
 
 

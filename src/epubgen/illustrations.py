@@ -25,8 +25,10 @@ class Illustrations:
         """
         try:
             key = path.resolve()
-        except (OSError, ValueError):  # 不是合法路徑（例如 %00 解碼出的 NUL 字元）：當作找不到
-            return self._unusable(f"找不到插圖：{name}", name)
+        except (OSError, ValueError):
+            # 不是合法路徑（例如 %00 解碼出的 NUL 字元）：以原路徑當鍵，is_file() 為假，當作找不到；
+            # 跟一般找不到的插圖一樣，同一條路徑只記一次。
+            key = path
         if key not in self._href_of:
             self._href_of[key] = self._load(path, name)
         return self._href_of[key]
