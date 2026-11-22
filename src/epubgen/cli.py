@@ -4,7 +4,7 @@ import argparse
 import sys
 from importlib.metadata import PackageNotFoundError, version
 
-from . import BuildOptions, EpubgenError, build_epub
+from . import COMIC_DEFAULT_DIRECTION, BookKind, BuildOptions, EpubgenError, build_epub
 from .metadata import is_valid_language
 from .epub import DIRECTIONS
 
@@ -45,7 +45,8 @@ def _max_size(value: str) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="epubgen",
-        description="把圖片資料夾轉成 fixed layout 的漫畫 EPUB。",
+        description=("把資料夾轉成 EPUB：只有圖片的資料夾產生 fixed layout 的漫畫書；"
+                     "含有 Markdown 檔（.md、.markdown）的資料夾產生文字可重排的文字書。"),
         epilog=(
             "Kobo 說明：輸出的檔案以同時給 Apple Books 與 Kobo 使用為目標。把檔案側載到 Kobo "
             "eInk 時，Kobo 官方規格說固定版面的書要用 .fxl.kepub.epub 副檔名才會以 Kobo "
@@ -53,14 +54,15 @@ def build_parser() -> argparse.ArgumentParser:
             "官方沒有說明。若顯示不正常，可以先把檔名改成 .fxl.kepub.epub 再試。"
         ),
     )
-    parser.add_argument("input", help="放滿圖片的資料夾")
+    parser.add_argument("input", help="放滿圖片或 Markdown 檔的資料夾")
     parser.add_argument(
-        "--direction", choices=DIRECTIONS, default="rtl",
-        help="翻頁方向：rtl 從右到左、ltr 從左到右（預設：rtl）",
+        "--direction", choices=DIRECTIONS,
+        help=(f"翻頁方向：rtl 從右到左、ltr 從左到右（漫畫書預設：{COMIC_DEFAULT_DIRECTION}）。"
+              "只對漫畫書有效"),
     )
     parser.add_argument(
         "--spread", action="store_true",
-        help="啟用雙頁模式：封面單獨一頁，其後兩兩並排（預設：每頁單獨顯示）",
+        help="啟用雙頁模式：封面單獨一頁，其後兩兩並排（預設：每頁單獨顯示）。只對漫畫書有效",
     )
     parser.add_argument(
         "-o", "--output", metavar="PATH",
@@ -72,7 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--skip-broken", action="store_true",
-        help="跳過無法讀取的圖片並在結束時列出（預設：遇到損毀圖片就報錯）",
+        help="跳過找不到或損毀的圖片並在結束時列出（預設：遇到這類圖片就報錯）",
     )
     parser.add_argument(
         "--title", metavar="TITLE",
@@ -85,7 +87,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--cover", metavar="IMAGE",
-        help="指定封面圖片，可以在輸入資料夾內或外；相對路徑從目前目錄算起（預設：第一頁）",
+        help=("指定封面圖片，可以在輸入資料夾內或外；相對路徑從目前目錄算起"
+              "（漫畫書預設：第一頁；文字書預設：無封面）"),
     )
     parser.add_argument(
         "--keep-webp", action="store_true",
@@ -121,7 +124,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"epubgen: 已跳過 {len(result.skipped)} 張無法讀取的圖片：", file=sys.stderr)
         for name in result.skipped:
             print(f"  - {name}", file=sys.stderr)
-    print(f"已輸出：{result.output}（共 {result.page_count} 頁）")
+    if result.warnings:
+        print(f"epubgen: 有 {len(result.warnings)} 則警告：", file=sys.stderr)
+        for warning in result.warnings:
+            print(f"  - {warning}", file=sys.stderr)
+    if result.kind is BookKind.TEXT:
+        print(f"已輸出：{result.output}（共 {result.chapter_count} 章）")
+    else:
+        print(f"已輸出：{result.output}（共 {result.page_count} 頁）")
     return 0
 
 

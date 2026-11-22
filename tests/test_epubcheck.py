@@ -53,6 +53,67 @@ def special_characters(folder):
     make_image(folder / "A&B <1>" / "2.jpg", size=(300, 500))
 
 
+def misnamed(folder):
+    make_image(folder / "1.jpg", size=(300, 500), fmt="GIF")
+    make_image(folder / "2.jpg", size=(300, 500), fmt="PNG")
+    make_image(folder / "3.png", size=(300, 500), fmt="JPEG")
+    make_image(folder / "4.gif", size=(300, 500), fmt="WEBP")
+
+
+def text_misnamed(folder):
+    (folder / "1.md").write_text("# 插圖\n\n![甲](a.jpg) ![乙](b.png)\n", encoding="utf-8")
+    make_image(folder / "a.jpg", fmt="PNG")
+    make_image(folder / "b.png", fmt="GIF")
+
+
+def text_simple(folder):
+    (folder / "8096_1.md").write_text("# 第1章 開端\n\n第一段 **粗體**，A & B < C。\n", encoding="utf-8")
+    (folder / "8096_2.md").write_text("沒有標題的一章。\n\n---\n\n第二段  \n硬換行。\n", encoding="utf-8")
+    (folder / "8096_10.md").write_text("# 第10章\n\n## 小標\n\n內容。\n", encoding="utf-8")
+
+
+def text_parts(folder):
+    def md(rel, text):
+        path = folder / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    md("序.md", "# 序\n\n前言，見[第二章](第2部%20A&B/深/2.md#重複-1)與[本章](#小節-a)。\n\n## 小節 A\n")
+    md("第2部 A&B/1.md", "# 第1章\n\n[回序](../序.md)、[失效](nope.md)、[外部](https://example.com)。\n")
+    md("第2部 A&B/深/2.md", "# 第2章 <x>\n\n## 重複\n\n## 重複\n\n[第一章](../1.md#第1章)\n")
+    md("第10部/1.md", "沒有標題。\n")
+    make_image(folder / "插圖" / "1.jpg")
+
+
+def text_rich(folder):
+    (folder / "1.md").write_text(
+        "# 表格與程式碼\n\n今天天氣很好，\n我們去散步。English\nwords ~~刪除~~。\n\n"
+        "| 名稱 | 數量 |\n|:--|--:|\n| A&B | <3> |\n\n"
+        "```python\ndef f(x):\n    return x < 1 and x & 2\n```\n\n"
+        "    縮排程式碼\n\n> 引用\n>\n> - 清單\n\n1. 一\n2. 二\n\n***\n", encoding="utf-8")
+
+
+def text_illustrated(folder):
+    (folder / "1.md").write_text(
+        "# 插圖\n\n![地圖](images/map.png)\n\n![](images/photo.webp) ![動](anim.gif)\n\n"
+        "![向量](a.svg) ![網圖](https://example.com/a.png)\n", encoding="utf-8")
+    (folder / "第一部").mkdir()
+    (folder / "第一部" / "2.md").write_text("# 共用\n\n![同一張](../images/map.png) ![外部](../../logo.jpg)\n",
+                                         encoding="utf-8")
+    make_image(folder / "images" / "map.png")
+    make_image(folder / "images" / "photo.webp")
+    make_image(folder / "anim.gif")
+    make_image(folder.parent / "logo.jpg")
+
+
+def text_warnings(folder):
+    (folder / "1.md").write_text(
+        "---\ntitle: x\n---\n# 第1章\n\n<div class=\"a\">\n<p>區塊 &nbsp; HTML</p>\n</div>\n\n"
+        "文 <span>行內</span> <br> <!-- 註解 --> &copy;。\n", encoding="utf-8")
+    (folder / "2.md").write_text("", encoding="utf-8")
+    (folder / "3.md").write_text("---\na: 1\n---\n", encoding="utf-8")
+
+
 SCENARIOS = {
     "basic": (flat, []),
     "ltr": (flat, ["--direction", "ltr"]),
@@ -68,6 +129,13 @@ SCENARIOS = {
     "resize-only": (flat, ["--max-size", "250"]),
     "webp-converted": (with_webp, []),
     "webp-kept": (with_webp, ["--keep-webp"]),
+    "misnamed-images": (misnamed, ["--keep-webp"]),
+    "text-simple": (text_simple, ["--author", "某某"]),
+    "text-parts": (text_parts, []),
+    "text-warnings": (text_warnings, []),
+    "text-rich": (text_rich, []),
+    "text-illustrated": (text_illustrated, ["--max-size", "60"]),
+    "text-misnamed-illustrations": (text_misnamed, []),
 }
 
 
@@ -111,3 +179,14 @@ def test_epubcheck_reports_no_errors_after_skipping_broken_images(tmp_path):
     ok, output = epubcheck.run(COMMAND, target)
 
     assert ok, f"EPUBCheck 回報錯誤（跳過損毀圖片）：\n{output}"
+
+
+@pytest.mark.parametrize("cover_name", ["front.jpg", "front.gif"])
+def test_epubcheck_reports_no_errors_for_a_text_book_with_a_cover(tmp_path, cover_name):
+    cover = tmp_path / cover_name
+    make_image(cover, size=(200, 300))
+    target = build(tmp_path, text_illustrated, [], extra=["--cover", str(cover)])
+
+    ok, output = epubcheck.run(COMMAND, target)
+
+    assert ok, f"EPUBCheck 回報錯誤（文字書封面 {cover_name}）：\n{output}"

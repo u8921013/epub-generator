@@ -4,3 +4,7 @@ __pycache__/
 .pytest_cache/
 .tools/
 device-test/
+
+# 本機的小說資料與抓取腳本（有著作權，不進版本控制）
+pages/
+test_novel.py

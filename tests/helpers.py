@@ -77,6 +77,61 @@ class Epub:
                       self.page_text(page_path))
         return int(m.group(1)), int(m.group(2))
 
+    def viewport_or_none(self, page_path: str):
+        """有 viewport 時回傳 (寬, 高)，沒有時回傳 None（文字書）。"""
+        return self.viewport(page_path) if 'name="viewport"' in self.page_text(page_path) else None
+
+    def chapter_root(self, chapter_path: str) -> ET.Element:
+        """把章的 XHTML 解析成 XML（解析失敗即代表不是格式正確的 XHTML）。"""
+        return ET.fromstring(self.zip.read(chapter_path))
+
+    def stylesheet_paths(self) -> list:
+        """manifest 裡所有 CSS 的 zip 內路徑。"""
+        return [self.resolve(i.get("href")) for i in self.manifest().values() if i.get("media-type") == "text/css"]
+
+    def stylesheets(self, chapter_path: str) -> list:
+        """章 <head> 引用的樣式表，換成 zip 內的路徑。"""
+        head = self.chapter_root(chapter_path).find("x:head", NS)
+        base = chapter_path.rpartition("/")[0]
+        return [self.resolve(link.get("href"), base) for link in head.findall("x:link", NS)
+                if link.get("rel") == "stylesheet"]
+
+    def chapter_body_text(self, chapter_path: str) -> str:
+        """章 <body> 的純文字。"""
+        body = self.chapter_root(chapter_path).find("x:body", NS)
+        return "".join(body.itertext())
+
+    def links(self, chapter_path: str) -> list:
+        """章內所有連結的（文字, 目標）。書內連結的目標換成 zip 內路徑（可帶 #錨點），外部連結原樣。"""
+        base = chapter_path.rpartition("/")[0]
+        out = []
+        for a in self.chapter_root(chapter_path).iter("{%s}a" % NS["x"]):
+            href = a.get("href")
+            if ":" not in href.split("#")[0]:
+                path, _, fragment = href.partition("#")
+                href = (self.resolve(path, base) if path else chapter_path) + (f"#{fragment}" if fragment else "")
+            out.append(("".join(a.itertext()), href))
+        return out
+
+    def illustrations(self) -> list:
+        """manifest 裡所有圖片（文字書的插圖）的 zip 內路徑，依 manifest 順序。"""
+        return [self.resolve(i.get("href")) for i in self.manifest().values()
+                if i.get("media-type").startswith("image/")]
+
+    def chapter_images(self, chapter_path: str) -> list:
+        """章內 <img> 的（zip 內路徑, 替代文字），依出現順序。"""
+        base = chapter_path.rpartition("/")[0]
+        return [(self.resolve(img.get("src"), base), img.get("alt"))
+                for img in self.chapter_root(chapter_path).iter("{%s}img" % NS["x"])]
+
+    def ids(self, chapter_path: str) -> list:
+        """章內所有元素的 id，依出現順序。"""
+        return [e.get("id") for e in self.chapter_root(chapter_path).iter() if e.get("id")]
+
+    def chapter_headings(self, chapter_path: str, tag: str) -> list:
+        """章內某一級標題（例如 "h1"）的純文字，依出現順序。"""
+        return ["".join(h.itertext()) for h in self.chapter_root(chapter_path).iter("{%s}%s" % (NS["x"], tag))]
+
     def meta_property(self, prop: str):
         for m in self.opf.findall(".//opf:metadata/opf:meta", NS):
             if m.get("property") == prop:
@@ -91,13 +146,33 @@ class Epub:
         return [i for i in self.manifest().values()
                 if "cover-image" in (i.get("properties") or "").split()]
 
-    def nav_links(self) -> list:
-        """回傳 navigation document 的 toc 連結 [(文字, 解析後路徑)]。"""
+    def _nav(self):
         nav_item = next(i for i in self.manifest().values()
                         if "nav" in (i.get("properties") or "").split())
         nav_path = self.resolve(nav_item.get("href"))
-        root = ET.fromstring(self.zip.read(nav_path))
-        base = nav_path.rpartition("/")[0]
+        return ET.fromstring(self.zip.read(nav_path)), nav_path.rpartition("/")[0]
+
+    def toc(self) -> list:
+        """回傳目錄項目 [(文字, 層級, 解析後路徑)]，層級從 1 起算，依出現順序。"""
+        root, base = self._nav()
+        toc_ol = root.find(".//x:nav/x:ol", NS)
+        entries = []
+
+        def walk(ol, level):
+            for li in ol.findall("x:li", NS):
+                a = li.find("x:a", NS)
+                entries.append(("".join(a.itertext()), level,
+                                self.resolve(a.get("href").split("#")[0], base)))
+                child = li.find("x:ol", NS)
+                if child is not None:
+                    walk(child, level + 1)
+
+        walk(toc_ol, 1)
+        return entries
+
+    def nav_links(self) -> list:
+        """回傳 navigation document 的 toc 連結 [(文字, 解析後路徑)]。"""
+        root, base = self._nav()
         links = []
         for a in root.iter("{%s}a" % NS["x"]):
             href = a.get("href").split("#")[0]

@@ -1,33 +1,46 @@
-"""epubgen：把圖片資料夾轉成 fixed layout 的漫畫 EPUB。"""
+"""epubgen：把資料夾轉成 EPUB。圖片資料夾產生 fixed layout 的漫畫書，
+Markdown 資料夾產生 reflowable 的文字書（見 ADR 0001）。"""
 
+import enum
 import os
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .epub import DIRECTIONS, BookSpec, TocEntry, write_epub
+from .epub import (DIRECTIONS, BookSpec, TextBookSpec, TextChapter, TocEntry, chapter_file_name,
+                   write_epub, write_text_epub)
 from .errors import BrokenImageError, EpubgenError
 from .layout import page_viewports
-from .images import ImageSettings, PageImage, cover_as_jpeg, load_image
+from .images import ImageSettings, PageImage, kobo_safe_cover, load_image
 from .metadata import is_valid_language, safe_file_name
-from .scan import IMAGE_EXTENSIONS, Book, scan_book
+from .illustrations import Illustrations
+from .targets import BookTargets, LinkedChapter
+from .markdown import RenderedChapter, render_markdown
+from .scan import IMAGE_EXTENSIONS, Book, is_text_book, scan_book, scan_text_book
 
 DEFAULT_LANGUAGE = "zh-TW"
+COMIC_DEFAULT_DIRECTION = "rtl"
 
-__all__ = ["build_epub", "BuildOptions", "BuildResult", "EpubgenError"]
+__all__ = ["build_epub", "BookKind", "BuildOptions", "BuildResult", "EpubgenError"]
+
+
+class BookKind(enum.Enum):
+    COMIC = "漫畫書"
+    TEXT = "文字書"
 
 
 @dataclass(frozen=True)
 class BuildOptions:
     output: Path | None = None  # 預設：輸入資料夾旁邊的 <書名>.epub
     force: bool = False  # 輸出檔已存在時是否覆蓋
-    skip_broken: bool = False  # 跳過損毀的圖片，而不是報錯
-    direction: str = "rtl"  # 翻頁方向，"rtl" 或 "ltr"
+    skip_broken: bool = False  # 跳過找不到或損毀的圖片，而不是報錯
+    direction: str | None = None  # 翻頁方向，"rtl" 或 "ltr"；None 表示未指定，依書的種類套用預設（漫畫書 rtl）
     spread: bool = False  # 雙頁模式
     title: str | None = None  # 預設：輸入資料夾名稱
     author: str | None = None
     language: str = DEFAULT_LANGUAGE
-    cover: Path | None = None  # 預設：第一頁
+    cover: Path | None = None  # 漫畫書預設：第一頁；文字書預設：無封面
     keep_webp: bool = False  # 預設把 WebP 轉成 JPEG；True 則保留原檔
     quality: int | None = None  # 重新壓縮的 JPEG 品質（1–100）；預設不重新壓縮
     max_size: int | None = None  # 長邊的像素上限；預設不縮放
@@ -36,8 +49,11 @@ class BuildOptions:
 @dataclass(frozen=True)
 class BuildResult:
     output: Path
-    page_count: int
+    page_count: int  # 漫畫書的頁數；文字書為 0
     skipped: tuple[str, ...] = ()  # 被 skip_broken 跳過的圖片檔名
+    kind: BookKind = BookKind.COMIC
+    chapter_count: int = 0  # 文字書的章數
+    warnings: tuple[str, ...] = ()  # 文字書的警告，每項為「檔名：原因」
 
 
 def build_epub(input_dir: Path, options: BuildOptions = BuildOptions()) -> BuildResult:
@@ -47,8 +63,9 @@ def build_epub(input_dir: Path, options: BuildOptions = BuildOptions()) -> Build
     成功後才移到目標路徑，失敗時不留下半成品。
     圖片損毀時預設報錯，options.skip_broken 則跳過並記錄在結果的 skipped。
     """
-    if options.direction not in DIRECTIONS:
+    if options.direction is not None and options.direction not in DIRECTIONS:
         raise EpubgenError(f"不合法的翻頁方向：{options.direction}（可用：{', '.join(DIRECTIONS)}）")
+    direction = COMIC_DEFAULT_DIRECTION if options.direction is None else options.direction
     if options.quality is not None and not 1 <= options.quality <= 100:
         raise EpubgenError(f"不合法的品質：{options.quality}（要在 1 到 100 之間）")
     if options.max_size is not None and options.max_size < 1:
@@ -61,6 +78,10 @@ def build_epub(input_dir: Path, options: BuildOptions = BuildOptions()) -> Build
     if not folder.is_dir():
         raise EpubgenError(f"輸入路徑不是資料夾：{input_dir}")
 
+    text_book = is_text_book(folder)
+    if text_book:
+        _reject_comic_only_options(options)
+
     title = folder.name if options.title is None else options.title.strip()
     if not title:
         raise EpubgenError("書名不可為空")
@@ -68,6 +89,78 @@ def build_epub(input_dir: Path, options: BuildOptions = BuildOptions()) -> Build
     destination = Path(destination)
     _check_destination(destination, options.force)
 
+    if text_book:
+        return _build_text_book(input_dir, folder, title, destination, options)
+    return _build_comic(input_dir, folder, title, destination, options, direction)
+
+
+def _reject_comic_only_options(options: BuildOptions) -> None:
+    """--direction 與 --spread 只對漫畫書有效；用在文字書時報錯，而不是默默忽略（ADR 0001）。"""
+    used = []
+    if options.direction is not None:
+        used.append("--direction")
+    if options.spread:
+        used.append("--spread")
+    if used:
+        raise EpubgenError(f"{'、'.join(used)} 只對漫畫書有效，不能用在文字書（Markdown 資料夾）")
+
+
+@dataclass(frozen=True)
+class _SourceChapter:
+    part: str | None
+    source: Path
+    name: str  # 相對於輸入資料夾的路徑，用在訊息裡
+    text: str
+    first_pass: RenderedChapter  # 不解析連結的第一次轉譯：只用它的是否為空與錨點
+
+
+def _build_text_book(input_dir: Path, folder: Path, title: str, destination: Path, options: BuildOptions) -> BuildResult:
+    settings = ImageSettings(options.keep_webp, options.quality, options.max_size)
+    cover = _text_book_cover(options.cover, settings)  # 封面有問題時先報，不必等讀完所有章
+    # 兩階段：先讀完所有章、取得各章錨點，才能驗證跨章的錨點連結。
+    sources = [_read_chapter(folder, part, source)
+               for part, source in scan_text_book(folder).chapters_in_reading_order()]
+    non_empty = [chapter for chapter in sources if not chapter.first_pass.is_empty]
+    if not non_empty:
+        raise EpubgenError(f"資料夾裡沒有任何有內容的章：{input_dir}")
+    # 章的檔名在這裡決定一次（依閱讀順序、只算有內容的章），書內連結與寫出 EPUB 都用它。
+    file_names = {chapter.source: chapter_file_name(i) for i, chapter in enumerate(non_empty, start=1)}
+    illustrations = Illustrations(settings, options.skip_broken)
+    targets = BookTargets({
+        chapter.source.resolve(): LinkedChapter(file_names[chapter.source], frozenset(chapter.first_pass.anchors))
+        for chapter in non_empty
+    }, illustrations)
+
+    chapters = []
+    warnings = []
+    for chapter in sources:
+        if chapter.first_pass.is_empty:
+            warnings.append(f"{chapter.name}：沒有內容（空檔案或只有 front matter），已略過")
+            continue
+        rendered = render_markdown(chapter.text, targets.for_chapter(chapter.source, chapter.name))
+        warnings.extend(f"{chapter.name}：{reason}" for reason in rendered.warnings)
+        chapters.append(TextChapter(title=rendered.title or chapter.source.stem, body=rendered.body,
+                                    file_name=file_names[chapter.source], part=chapter.part))
+    book = TextBookSpec(title=title, language=options.language, chapters=tuple(chapters),
+                        author=options.author, illustrations=tuple(illustrations.images),
+                        cover=cover)
+    _write_atomically(lambda tmp: write_text_epub(book, tmp), destination, options.force)
+    return BuildResult(output=destination, page_count=0, kind=BookKind.TEXT,
+                       chapter_count=len(chapters), warnings=tuple(warnings),
+                       skipped=tuple(illustrations.skipped))
+
+
+def _read_chapter(folder: Path, part: str | None, source: Path) -> _SourceChapter:
+    name = source.relative_to(folder).as_posix()
+    try:
+        text = source.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise EpubgenError(f"無法讀取 Markdown 檔（需要 UTF-8）：{name}") from exc
+    return _SourceChapter(part, source, name, text, render_markdown(text))
+
+
+def _build_comic(input_dir: Path, folder: Path, title: str, destination: Path, options: BuildOptions,
+                 direction: str) -> BuildResult:
     scanned = scan_book(folder)
     if not scanned.pages:
         raise EpubgenError(f"資料夾裡沒有可用的圖片：{input_dir}")
@@ -80,11 +173,11 @@ def build_epub(input_dir: Path, options: BuildOptions = BuildOptions()) -> Build
 
     book = BookSpec(
         title=title, language=options.language, pages=loaded.pages,
-        direction=options.direction, spread=options.spread, chapters=tuple(loaded.toc),
+        direction=direction, spread=options.spread, chapters=tuple(loaded.toc),
         author=options.author, cover_page=cover_page, external_cover=external_cover,
         viewports=tuple(page_viewports(loaded.pages)),
     )
-    _write_atomically(book, destination, options.force)
+    _write_atomically(lambda tmp: write_epub(book, tmp), destination, options.force)
     return BuildResult(output=destination, page_count=len(loaded.pages),
                        skipped=tuple(loaded.skipped))
 
@@ -97,26 +190,43 @@ def _resolve_cover(cover: Path | None, loaded: "_LoadedPages", settings: ImageSe
     """
     page, external = _pick_cover(cover, loaded, settings)
     chosen = external or loaded.pages[page - 1]
-    if chosen.extension == ".gif":
-        external = cover_as_jpeg(chosen, settings.quality)
-    return page, external
+    safe = kobo_safe_cover(chosen, settings.quality)
+    return page, (external if safe is chosen else safe)
 
 
 def _pick_cover(cover: Path | None, loaded: "_LoadedPages", settings: ImageSettings):
     if cover is None:
         return 1, None
+    path = _checked_cover_path(cover)
+    page = loaded.page_of.get(path.resolve())
+    if page is not None:
+        return page, None
+    return 1, _load_cover(path, settings)
+
+
+def _checked_cover_path(cover: Path) -> Path:
+    """--cover 指定的檔案要存在、是支援的圖片格式；相對路徑從目前目錄算起。"""
     path = Path(cover)
     if not path.exists():
         raise EpubgenError(f"封面圖片不存在：{cover}")
     if not path.is_file() or path.suffix.lower() not in IMAGE_EXTENSIONS:
         raise EpubgenError(f"封面不是支援的圖片檔（JPEG、PNG、WebP、GIF）：{cover}")
-    page = loaded.page_of.get(path.resolve())
-    if page is not None:
-        return page, None
+    return path
+
+
+def _load_cover(path: Path, settings: ImageSettings) -> PageImage:
+    """讀取封面；損毀時一律報錯，--skip-broken 也不跳過封面。"""
     try:
-        return 1, load_image(path, settings=settings)
+        return load_image(path, settings=settings)
     except BrokenImageError as exc:
-        raise EpubgenError(f"無法讀取封面圖片：{cover}") from exc
+        raise EpubgenError(f"無法讀取封面圖片：{path}") from exc
+
+
+def _text_book_cover(cover: Path | None, settings: ImageSettings) -> PageImage | None:
+    """文字書的封面圖。GIF 跟漫畫書一樣另外轉成 JPEG，因為 Kobo 不支援 GIF 封面。"""
+    if cover is None:
+        return None
+    return kobo_safe_cover(_load_cover(_checked_cover_path(cover), settings), settings.quality)
 
 
 @dataclass
@@ -164,7 +274,7 @@ def _check_destination(destination: Path, force: bool) -> None:
         raise EpubgenError(f"輸出檔已存在：{destination}（要覆蓋請加上 --force）")
 
 
-def _write_atomically(book: BookSpec, destination: Path, force: bool) -> None:
+def _write_atomically(write: Callable[[Path], None], destination: Path, force: bool) -> None:
     try:
         fd, tmp_name = tempfile.mkstemp(suffix=".epub.tmp", dir=destination.parent)
     except OSError as exc:
@@ -176,7 +286,7 @@ def _write_atomically(book: BookSpec, destination: Path, force: bool) -> None:
     os.umask(umask)
     os.chmod(tmp, 0o666 & ~umask)
     try:
-        write_epub(book, tmp)
+        write(tmp)
         _check_destination(destination, force)  # 寫入期間目標可能被別人建立
         os.replace(tmp, destination)
     except OSError as exc:
