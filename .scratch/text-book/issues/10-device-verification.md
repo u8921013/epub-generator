@@ -30,3 +30,10 @@ Apple Books 與 Kobo 上進行，結果補記於此。
 **2026-11-22（使用者）** Apple Books：`T-text-book` 與 `U-pages-novel` 兩本都驗收通過。
 Kobo 先跳過，本票維持 `ready-for-human`，等 Kobo 測完再勾選其餘項目並結案。
 
+**2026-11-22（使用者）** Readium Web 閱讀器：以 code review 修正後的程式（commit `16e3b35`）重新產生
+`T-text-book` 與 `U-pages-novel`，開啟都沒有問題。這是額外的佐證，不取代 Kobo 驗收。
+
+Kobo 驗收延到後續階段，屆時一併確認 code review（`docs/code-review/2026-11-22.md`）第 12 項：
+封面頁 CSS 的 `max-height: 100vh` 在 Kobo 側載純 `.epub`（Adobe RMSDK）時是否生效、細長封面圖會不會跨頁。
+若會跨頁，再評估改用 SVG 包裝封面圖或其他相容寫法。
+
