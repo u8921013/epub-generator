@@ -115,6 +115,8 @@ class _SourceChapter:
 
 
 def _build_text_book(input_dir: Path, folder: Path, title: str, destination: Path, options: BuildOptions) -> BuildResult:
+    settings = ImageSettings(options.keep_webp, options.quality, options.max_size)
+    cover = _text_book_cover(options.cover, settings)  # 封面有問題時先報，不必等讀完所有章
     # 兩階段：先讀完所有章、取得各章錨點，才能驗證跨章的錨點連結。
     sources = [_read_chapter(folder, part, source)
                for part, source in scan_text_book(folder).chapters_in_reading_order()]
@@ -122,8 +124,7 @@ def _build_text_book(input_dir: Path, folder: Path, title: str, destination: Pat
     if not non_empty:
         raise EpubgenError(f"資料夾裡沒有任何有內容的章：{input_dir}")
     # 章的編號與 write_text_epub 相同：依閱讀順序、只算有內容的章。
-    illustrations = Illustrations(ImageSettings(options.keep_webp, options.quality, options.max_size),
-                                  options.skip_broken)
+    illustrations = Illustrations(settings, options.skip_broken)
     targets = BookTargets({
         chapter.source.resolve(): LinkedChapter(chapter_file_name(i), frozenset(chapter.first_pass.anchors))
         for i, chapter in enumerate(non_empty, start=1)
@@ -139,7 +140,8 @@ def _build_text_book(input_dir: Path, folder: Path, title: str, destination: Pat
         warnings.extend(f"{chapter.name}：{reason}" for reason in rendered.warnings)
         chapters.append(TextChapter(title=rendered.title or chapter.source.stem, body=rendered.body, part=chapter.part))
     book = TextBookSpec(title=title, language=options.language, chapters=tuple(chapters),
-                        author=options.author, illustrations=tuple(illustrations.images))
+                        author=options.author, illustrations=tuple(illustrations.images),
+                        cover=cover)
     _write_atomically(lambda tmp: write_text_epub(book, tmp), destination, options.force)
     return BuildResult(output=destination, page_count=0, kind=BookKind.TEXT,
                        chapter_count=len(chapters), warnings=tuple(warnings),
@@ -194,18 +196,37 @@ def _resolve_cover(cover: Path | None, loaded: "_LoadedPages", settings: ImageSe
 def _pick_cover(cover: Path | None, loaded: "_LoadedPages", settings: ImageSettings):
     if cover is None:
         return 1, None
+    path = _checked_cover_path(cover)
+    page = loaded.page_of.get(path.resolve())
+    if page is not None:
+        return page, None
+    return 1, _load_cover(path, settings)
+
+
+def _checked_cover_path(cover: Path) -> Path:
+    """--cover 指定的檔案要存在、是支援的圖片格式；相對路徑從目前目錄算起。"""
     path = Path(cover)
     if not path.exists():
         raise EpubgenError(f"封面圖片不存在：{cover}")
     if not path.is_file() or path.suffix.lower() not in IMAGE_EXTENSIONS:
         raise EpubgenError(f"封面不是支援的圖片檔（JPEG、PNG、WebP、GIF）：{cover}")
-    page = loaded.page_of.get(path.resolve())
-    if page is not None:
-        return page, None
+    return path
+
+
+def _load_cover(path: Path, settings: ImageSettings) -> PageImage:
+    """讀取封面；損毀時一律報錯，--skip-broken 也不跳過封面。"""
     try:
-        return 1, load_image(path, settings=settings)
+        return load_image(path, settings=settings)
     except BrokenImageError as exc:
-        raise EpubgenError(f"無法讀取封面圖片：{cover}") from exc
+        raise EpubgenError(f"無法讀取封面圖片：{path}") from exc
+
+
+def _text_book_cover(cover: Path | None, settings: ImageSettings) -> PageImage | None:
+    """文字書的封面圖。GIF 跟漫畫書一樣另外轉成 JPEG，因為 Kobo 不支援 GIF 封面。"""
+    if cover is None:
+        return None
+    image = _load_cover(_checked_cover_path(cover), settings)
+    return cover_as_jpeg(image, settings.quality) if image.extension == ".gif" else image
 
 
 @dataclass

@@ -458,3 +458,97 @@ def test_web_and_svg_illustrations_show_alt_text_with_warnings(tmp_path, capsys)
     assert "網圖 向量" in book.chapter_body_text(chapter_path(1))
     err = capsys.readouterr().err
     assert "a.md：網路圖片不會下載" in err and "a.md：不支援的插圖格式" in err
+
+
+# --- 封面與封面頁 ----------------------------------------------------------------
+
+def cover_of(book):
+    covers = book.cover_items()
+    assert len(covers) == 1
+    return covers[0], book.resolve(covers[0].get("href"))
+
+
+def test_a_cover_becomes_the_cover_image_and_a_cover_page_first_in_the_spine(novel, tmp_path):
+    cover_bytes = make_image(tmp_path / "art" / "cover.jpg", size=(300, 450))
+    book = build(novel, "--cover", str(tmp_path / "art" / "cover.jpg"))
+    item, cover_path = cover_of(book)
+    assert item.get("media-type") == "image/jpeg"
+    assert book.zip.read(cover_path) == cover_bytes
+    first, *chapters = book.page_paths()
+    assert chapters == [chapter_path(1), chapter_path(2)]
+    assert [path for path, _ in book.chapter_images(first)] == [cover_path]
+    assert book.chapter_body_text(first).strip() == ""
+
+
+def test_the_cover_page_is_not_in_the_toc(novel, tmp_path):
+    make_image(tmp_path / "cover.png")
+    book = build(novel, "--cover", str(tmp_path / "cover.png"))
+    cover_page = book.page_paths()[0]
+    assert [target for _, _, target in book.toc()] == [chapter_path(1), chapter_path(2)]
+    assert cover_page not in [target for _, _, target in book.toc()]
+
+
+def test_without_a_cover_there_is_no_cover_image_or_cover_page(novel):
+    book = build(novel)
+    assert book.cover_items() == []
+    assert book.page_paths()[0] == chapter_path(1)
+    assert not [n for n in book.zip.namelist() if "cover" in n.lower()]
+
+
+def test_a_relative_cover_path_is_resolved_from_the_working_directory(novel, tmp_path, monkeypatch):
+    make_image(tmp_path / "art" / "c.jpg")
+    monkeypatch.chdir(tmp_path / "art")
+    book = build(novel, "--cover", "c.jpg")
+    assert len(book.cover_items()) == 1
+
+
+def test_a_gif_cover_becomes_a_jpeg_like_comics(novel, tmp_path):
+    make_image(tmp_path / "cover.gif")
+    book = build(novel, "--cover", str(tmp_path / "cover.gif"))
+    item, cover_path = cover_of(book)
+    assert item.get("media-type") == "image/jpeg"
+    assert book.zip.read(cover_path)[:3] == b"\xff\xd8\xff"
+    assert [path for path, _ in book.chapter_images(book.page_paths()[0])] == [cover_path]
+
+
+def test_image_options_apply_to_the_cover(novel, tmp_path):
+    make_image(tmp_path / "cover.webp", size=(300, 450))
+    book = build(novel, "--cover", str(tmp_path / "cover.webp"), "--max-size", "90")
+    item, cover_path = cover_of(book)
+    assert item.get("media-type") == "image/jpeg"
+    from PIL import Image
+    import io
+    assert Image.open(io.BytesIO(book.zip.read(cover_path))).size == (60, 90)
+
+
+@pytest.mark.parametrize("make, message", [
+    (lambda path: None, "封面圖片不存在"),
+    (lambda path: path.with_suffix(".svg").write_text("<svg/>"), "不是支援的圖片"),
+    (lambda path: path.with_suffix(".png").write_bytes(b"not a png"), "無法讀取封面圖片"),
+    (lambda path: path.with_suffix(".jpg").mkdir(), "不是支援的圖片"),
+])
+def test_a_bad_cover_is_an_error_and_makes_no_book(novel, tmp_path, capsys, make, message):
+    stem = tmp_path / "cover"
+    make(stem)
+    candidates = [p for p in tmp_path.iterdir() if p.name.startswith("cover")]
+    cover = candidates[0] if candidates else stem.with_suffix(".jpg")
+    assert main([str(novel), "--cover", str(cover), "--skip-broken"]) == 1
+    assert message in capsys.readouterr().err
+    assert not (tmp_path / "pages.epub").exists()
+
+
+def test_a_bad_cover_is_reported_before_problems_in_the_chapters(tmp_path, capsys):
+    folder = tmp_path / "pages"
+    (folder).mkdir()
+    (folder / "bad.md").write_bytes(b"\xff\xfe\x00bad")
+    assert main([str(folder), "--cover", str(tmp_path / "missing.jpg")]) == 1
+    assert "封面圖片不存在" in capsys.readouterr().err
+
+
+def test_a_cover_that_is_also_an_illustration_is_packaged_for_both(tmp_path):
+    folder = tmp_path / "pages"
+    write_md(folder / "a.md", "# 甲\n\n![圖](art.jpg)\n")
+    make_image(folder / "art.jpg")
+    book = build(folder, "--cover", str(folder / "art.jpg"))
+    assert len(book.cover_items()) == 1
+    assert len(book.illustrations()) == 2  # 封面圖與插圖各一份

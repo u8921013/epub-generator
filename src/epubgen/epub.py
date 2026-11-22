@@ -219,6 +219,7 @@ class TextBookSpec:
     chapters: tuple[TextChapter, ...]
     author: str | None = None
     illustrations: tuple[PageImage, ...] = ()  # 依編號排列；第 i 張的位置見 illustration_href
+    cover: PageImage | None = None  # 有的話：manifest 標記為 cover-image，spine 最前面加一頁封面頁
 
 
 def illustration_href(index: int, image: PageImage) -> str:
@@ -257,28 +258,52 @@ table { border-collapse: collapse; margin: 1em 0; }
 th, td { border: 1px solid #999; padding: 0.25em 0.5em; }
 img { max-width: 100%; height: auto; }
 hr { margin: 1.5em 0; }
+.cover { margin: 0; padding: 0; text-align: center; }
+.cover img { max-width: 100%; max-height: 100vh; }
 """
 
+_COVER_PAGE_HREF = "text/cover.xhtml"
 
-def _chapter_xhtml(chapter: TextChapter, language: str) -> str:
+
+def _cover_image_path(cover: PageImage) -> str:
+    return f"images/cover{cover.extension}"
+
+
+def _text_xhtml(title: str, language: str, body: str, body_attributes: str = "") -> str:
+    """文字書的 XHTML 頁（章與封面頁共用）：引用內建 CSS，放在 text/ 之下。"""
     return (
         XML_DECL
         + '<!DOCTYPE html>\n'
         + f'<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"'
         + f' lang={quoteattr(language)} xml:lang={quoteattr(language)}>\n'
-        + f"<head>\n  <meta charset=\"utf-8\"/>\n  <title>{escape(chapter.title)}</title>\n"
+        + f"<head>\n  <meta charset=\"utf-8\"/>\n  <title>{escape(title)}</title>\n"
         + f'  <link rel="stylesheet" type="text/css" href="../{_STYLESHEET_HREF}"/>\n</head>\n'
-        + "<body>\n"
-        + chapter.body
+        + f"<body{body_attributes}>\n"
+        + body
         + "</body>\n"
         + "</html>\n"
     )
+
+
+def _cover_page_xhtml(book: TextBookSpec) -> str:
+    """只放封面圖的頁面；不在目錄裡。"""
+    image = f'  <img src="../{_cover_image_path(book.cover)}" alt={quoteattr(book.title)}/>\n'
+    return _text_xhtml(book.title, book.language, image, ' class="cover" epub:type="cover"')
+
+
+def _chapter_xhtml(chapter: TextChapter, language: str) -> str:
+    return _text_xhtml(chapter.title, language, chapter.body)
 
 
 def _text_package_opf(book: TextBookSpec, identifier: str, modified: str) -> str:
     manifest = ['    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>',
                 f'    <item id="css" href="{_STYLESHEET_HREF}" media-type="text/css"/>']
     spine = []
+    if book.cover is not None:
+        manifest.append(f'    <item id="cover-image" href="{_cover_image_path(book.cover)}"'
+                        f' media-type="{book.cover.media_type}" properties="cover-image"/>')
+        manifest.append(f'    <item id="cover" href="{_COVER_PAGE_HREF}" media-type="application/xhtml+xml"/>')
+        spine.append('    <itemref idref="cover"/>')
     for i, _chapter in enumerate(book.chapters, start=1):
         manifest.append(f'    <item id="chapter-{i:04d}" href="{_chapter_href(i)}"'
                         f' media-type="application/xhtml+xml"/>')
@@ -320,6 +345,9 @@ def write_text_epub(book: TextBookSpec, destination: Path) -> None:
                       zipfile.ZIP_DEFLATED))
     for i, image in enumerate(book.illustrations, start=1):
         files.append((f"OEBPS/{_illustration_path(i, image)}", image.data, zipfile.ZIP_STORED))
+    if book.cover is not None:
+        files.append((f"OEBPS/{_COVER_PAGE_HREF}", _cover_page_xhtml(book), zipfile.ZIP_DEFLATED))
+        files.append((f"OEBPS/{_cover_image_path(book.cover)}", book.cover.data, zipfile.ZIP_STORED))
     _write_zip(destination, files)
 
 

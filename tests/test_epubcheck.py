@@ -164,3 +164,14 @@ def test_epubcheck_reports_no_errors_after_skipping_broken_images(tmp_path):
     ok, output = epubcheck.run(COMMAND, target)
 
     assert ok, f"EPUBCheck 回報錯誤（跳過損毀圖片）：\n{output}"
+
+
+@pytest.mark.parametrize("cover_name", ["front.jpg", "front.gif"])
+def test_epubcheck_reports_no_errors_for_a_text_book_with_a_cover(tmp_path, cover_name):
+    cover = tmp_path / cover_name
+    make_image(cover, size=(200, 300))
+    target = build(tmp_path, text_illustrated, [], extra=["--cover", str(cover)])
+
+    ok, output = epubcheck.run(COMMAND, target)
+
+    assert ok, f"EPUBCheck 回報錯誤（文字書封面 {cover_name}）：\n{output}"
