@@ -53,6 +53,19 @@ def special_characters(folder):
     make_image(folder / "A&B <1>" / "2.jpg", size=(300, 500))
 
 
+def misnamed(folder):
+    make_image(folder / "1.jpg", size=(300, 500), fmt="GIF")
+    make_image(folder / "2.jpg", size=(300, 500), fmt="PNG")
+    make_image(folder / "3.png", size=(300, 500), fmt="JPEG")
+    make_image(folder / "4.gif", size=(300, 500), fmt="WEBP")
+
+
+def text_misnamed(folder):
+    (folder / "1.md").write_text("# 插圖\n\n![甲](a.jpg) ![乙](b.png)\n", encoding="utf-8")
+    make_image(folder / "a.jpg", fmt="PNG")
+    make_image(folder / "b.png", fmt="GIF")
+
+
 def text_simple(folder):
     (folder / "8096_1.md").write_text("# 第1章 開端\n\n第一段 **粗體**，A & B < C。\n", encoding="utf-8")
     (folder / "8096_2.md").write_text("沒有標題的一章。\n\n---\n\n第二段  \n硬換行。\n", encoding="utf-8")
@@ -116,11 +129,13 @@ SCENARIOS = {
     "resize-only": (flat, ["--max-size", "250"]),
     "webp-converted": (with_webp, []),
     "webp-kept": (with_webp, ["--keep-webp"]),
+    "misnamed-images": (misnamed, ["--keep-webp"]),
     "text-simple": (text_simple, ["--author", "某某"]),
     "text-parts": (text_parts, []),
     "text-warnings": (text_warnings, []),
     "text-rich": (text_rich, []),
     "text-illustrated": (text_illustrated, ["--max-size", "60"]),
+    "text-misnamed-illustrations": (text_misnamed, []),
 }
 
 
@@ -164,3 +179,14 @@ def test_epubcheck_reports_no_errors_after_skipping_broken_images(tmp_path):
     ok, output = epubcheck.run(COMMAND, target)
 
     assert ok, f"EPUBCheck 回報錯誤（跳過損毀圖片）：\n{output}"
+
+
+@pytest.mark.parametrize("cover_name", ["front.jpg", "front.gif"])
+def test_epubcheck_reports_no_errors_for_a_text_book_with_a_cover(tmp_path, cover_name):
+    cover = tmp_path / cover_name
+    make_image(cover, size=(200, 300))
+    target = build(tmp_path, text_illustrated, [], extra=["--cover", str(cover)])
+
+    ok, output = epubcheck.run(COMMAND, target)
+
+    assert ok, f"EPUBCheck 回報錯誤（文字書封面 {cover_name}）：\n{output}"
