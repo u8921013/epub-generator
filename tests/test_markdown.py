@@ -334,3 +334,64 @@ def test_links_with_a_scheme_are_kept_as_written():
 
 def test_without_a_resolver_links_are_left_as_written():
     assert links(render_markdown("[a](x.md#y)\n").body) == [("a", "x.md#y")]
+
+
+# --- 插圖 ------------------------------------------------------------------------
+
+class Images:
+    """假的目標解析器：只認得給定的插圖，並記下被問過哪些目標。"""
+
+    def __init__(self, images):
+        self.images = images
+        self.asked = []
+
+    def link(self, target):
+        return None
+
+    def image(self, target):
+        self.asked.append(target)
+        return self.images.get(target)
+
+
+def images(body: str) -> list:
+    return [(img.get("src"), img.get("alt")) for img in parse(body).iter(f"{X}img")]
+
+
+def test_local_illustrations_are_replaced_by_what_the_resolver_returns():
+    resolver = Images({"images/a.png": "../images/img-0001.png", "../共用/b 圖.JPG": "../images/img-0002.jpg"})
+    result = render_markdown("前 ![甲圖](images/a.png) 後\n\n![乙](<../共用/b 圖.JPG>)\n", resolver)
+    assert images(result.body) == [("../images/img-0001.png", "甲圖"), ("../images/img-0002.jpg", "乙")]
+    assert resolver.asked == ["images/a.png", "../共用/b 圖.JPG"]
+    assert result.warnings == ()
+
+
+def test_an_illustration_the_resolver_skips_shows_its_alt_text_without_a_warning():
+    result = render_markdown("前 ![替代 *文字*](gone.png) 後\n", Images({}))
+    root = parse(result.body)
+    assert root.find(f".//{X}img") is None
+    assert paragraph_text("前 ![替代 *文字*](gone.png) 後\n") == "前 替代 文字 後"
+    assert result.warnings == ()
+
+
+@pytest.mark.parametrize("markdown, warning", [
+    ("![網圖](https://example.com/a.png)", "網路圖片不會下載，改顯示替代文字：https://example.com/a.png（第 3 行）"),
+    ("![向量](a.svg)", "不支援的插圖格式，改顯示替代文字：a.svg（第 3 行）"),
+    ("![點陣](scan.TIFF)", "不支援的插圖格式，改顯示替代文字：scan.TIFF（第 3 行）"),
+    ("![無副檔名](picture)", "不支援的插圖格式，改顯示替代文字：picture（第 3 行）"),
+])
+def test_web_and_unsupported_illustrations_show_alt_text_with_a_warning(markdown, warning):
+    class Refuses:
+        def link(self, target):
+            return None
+
+        def image(self, target):
+            raise AssertionError(f"不該交給解析器：{target}")
+
+    result = render_markdown(f"# 章\n\n{markdown}\n", Refuses())
+    assert parse(result.body).find(f".//{X}img") is None
+    assert result.warnings == (warning,)
+
+
+def test_an_empty_alt_text_falls_back_to_the_file_name():
+    assert paragraph_text("前![](https://example.com/dir/photo.png?x=1)後\n") == "前photo.png後"
+    assert paragraph_text("前![](images/%E5%9C%96.svg)後\n") == "前圖.svg後"

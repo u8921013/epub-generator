@@ -7,13 +7,16 @@
 import re
 import unicodedata
 from collections.abc import Iterable, Iterator
-from urllib.parse import unquote
+from pathlib import PurePosixPath
+from urllib.parse import unquote, urlsplit
 from dataclasses import dataclass
 from typing import Protocol
 
 from markdown_it import MarkdownIt
 from markdown_it.common.utils import escapeHtml
 from markdown_it.token import Token
+
+from .scan import IMAGE_EXTENSIONS
 
 
 class TargetResolver(Protocol):
@@ -23,7 +26,8 @@ class TargetResolver(Protocol):
         """連結目標（Markdown 檔，可帶 #錨點）。"""
 
     def image(self, target: str) -> str | None:
-        """插圖路徑。"""
+        """插圖路徑（只會問 JPEG、PNG、GIF、WebP）。回傳 None 時改顯示替代文字，不另外警告：
+        找不到或損毀的插圖由解析器自己決定要報錯，或記到跳過清單。"""
 
 
 @dataclass(frozen=True)
@@ -88,7 +92,13 @@ def _parser() -> MarkdownIt:
     md.add_render_rule("html_block", _escaped_html_block)
     md.add_render_rule("html_inline", _escaped_html_inline)
     md.add_render_rule("softbreak", _softbreak)
+    md.add_render_rule("image", _image_or_alt_text)
     return md
+
+
+def _image_or_alt_text(self, tokens: list[Token], idx: int, options, env) -> str:
+    fallback = tokens[idx].meta.get("fallback")
+    return self.image(tokens, idx, options, env) if fallback is None else escapeHtml(fallback)
 
 
 def _softbreak(self, tokens: list[Token], idx: int, options, env) -> str:
@@ -153,8 +163,39 @@ def render_markdown(text: str, resolver: TargetResolver | None = None) -> Render
     if resolver is not None:
         for line, target in _resolve_links(tokens, resolver):
             warnings.append(f"失效的連結已改成純文字：{target}（第 {line + skipped_lines} 行）")
+        for line, reason in _resolve_images(tokens, resolver):
+            warnings.append(f"{reason}（第 {line + skipped_lines} 行）")
     return RenderedChapter(title=_first_h1_text(tokens), body=md.renderer.render(tokens, md.options, {}),
                            is_empty=not tokens, warnings=tuple(warnings), anchors=tuple(anchors))
+
+
+def _resolve_images(tokens: list[Token], resolver: TargetResolver) -> list[tuple[int, str]]:
+    """把本地插圖換成解析器給的書內 href；用不了的插圖改顯示替代文字。回傳需要警告的（行號, 原因）。"""
+    warnings = []
+    for line, child in _inline_children_with_lines(tokens):
+        if child.type != "image":
+            continue
+        src = str(child.attrGet("src") or "")
+        if _SCHEME.match(src):
+            _show_alt_text(child, unquote(PurePosixPath(urlsplit(src).path).name))
+            warnings.append((line, f"網路圖片不會下載，改顯示替代文字：{src}"))
+            continue
+        target = unquote(src)
+        if PurePosixPath(target).suffix.lower() not in IMAGE_EXTENSIONS:
+            _show_alt_text(child, PurePosixPath(target).name)
+            warnings.append((line, f"不支援的插圖格式，改顯示替代文字：{target}"))
+            continue
+        href = resolver.image(target)
+        if href is None:
+            _show_alt_text(child, PurePosixPath(target).name)
+        else:
+            child.attrSet("src", href)
+    return warnings
+
+
+def _show_alt_text(image: Token, file_name: str) -> None:
+    """以替代文字取代圖片；替代文字為空時用檔名，讓讀者知道這裡原本有圖。"""
+    image.meta["fallback"] = _plain_text(image).strip() or file_name
 
 
 # --- 標題錨點 --------------------------------------------------------------------

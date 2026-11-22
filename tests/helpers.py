@@ -113,6 +113,17 @@ class Epub:
             out.append(("".join(a.itertext()), href))
         return out
 
+    def illustrations(self) -> list:
+        """manifest 裡所有圖片（文字書的插圖）的 zip 內路徑，依 manifest 順序。"""
+        return [self.resolve(i.get("href")) for i in self.manifest().values()
+                if i.get("media-type").startswith("image/")]
+
+    def chapter_images(self, chapter_path: str) -> list:
+        """章內 <img> 的（zip 內路徑, 替代文字），依出現順序。"""
+        base = chapter_path.rpartition("/")[0]
+        return [(self.resolve(img.get("src"), base), img.get("alt"))
+                for img in self.chapter_root(chapter_path).iter("{%s}img" % NS["x"])]
+
     def ids(self, chapter_path: str) -> list:
         """章內所有元素的 id，依出現順序。"""
         return [e.get("id") for e in self.chapter_root(chapter_path).iter() if e.get("id")]

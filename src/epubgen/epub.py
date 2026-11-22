@@ -218,6 +218,17 @@ class TextBookSpec:
     language: str
     chapters: tuple[TextChapter, ...]
     author: str | None = None
+    illustrations: tuple[PageImage, ...] = ()  # 依編號排列；第 i 張的位置見 illustration_href
+
+
+def illustration_href(index: int, image: PageImage) -> str:
+    """第 index 張插圖（從 1 起算）從章 XHTML 看過去的 href。"""
+    return f"../{_illustration_path(index, image)}"
+
+
+def _illustration_path(index: int, image: PageImage) -> str:
+    """第 index 張插圖相對 OEBPS 的路徑。"""
+    return f"images/illus-{index:04d}{image.extension}"
 
 
 def chapter_file_name(index: int) -> str:
@@ -272,6 +283,9 @@ def _text_package_opf(book: TextBookSpec, identifier: str, modified: str) -> str
         manifest.append(f'    <item id="chapter-{i:04d}" href="{_chapter_href(i)}"'
                         f' media-type="application/xhtml+xml"/>')
         spine.append(f'    <itemref idref="chapter-{i:04d}"/>')
+    for i, image in enumerate(book.illustrations, start=1):
+        manifest.append(f'    <item id="illus-{i:04d}" href="{_illustration_path(i, image)}"'
+                        f' media-type="{image.media_type}"/>')
     # 不宣告 rendition:layout，預設即為 reflowable。
     return _package_document(book.title, book.author, book.language, identifier, modified,
                              "", manifest, spine, "ltr")
@@ -304,6 +318,8 @@ def write_text_epub(book: TextBookSpec, destination: Path) -> None:
     for i, chapter in enumerate(book.chapters, start=1):
         files.append((f"OEBPS/{_chapter_href(i)}", _chapter_xhtml(chapter, book.language),
                       zipfile.ZIP_DEFLATED))
+    for i, image in enumerate(book.illustrations, start=1):
+        files.append((f"OEBPS/{_illustration_path(i, image)}", image.data, zipfile.ZIP_STORED))
     _write_zip(destination, files)
 
 

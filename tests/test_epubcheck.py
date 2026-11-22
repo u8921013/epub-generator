@@ -80,6 +80,19 @@ def text_rich(folder):
         "    縮排程式碼\n\n> 引用\n>\n> - 清單\n\n1. 一\n2. 二\n\n***\n", encoding="utf-8")
 
 
+def text_illustrated(folder):
+    (folder / "1.md").write_text(
+        "# 插圖\n\n![地圖](images/map.png)\n\n![](images/photo.webp) ![動](anim.gif)\n\n"
+        "![向量](a.svg) ![網圖](https://example.com/a.png)\n", encoding="utf-8")
+    (folder / "第一部").mkdir()
+    (folder / "第一部" / "2.md").write_text("# 共用\n\n![同一張](../images/map.png) ![外部](../../logo.jpg)\n",
+                                         encoding="utf-8")
+    make_image(folder / "images" / "map.png")
+    make_image(folder / "images" / "photo.webp")
+    make_image(folder / "anim.gif")
+    make_image(folder.parent / "logo.jpg")
+
+
 def text_warnings(folder):
     (folder / "1.md").write_text(
         "---\ntitle: x\n---\n# 第1章\n\n<div class=\"a\">\n<p>區塊 &nbsp; HTML</p>\n</div>\n\n"
@@ -107,6 +120,7 @@ SCENARIOS = {
     "text-parts": (text_parts, []),
     "text-warnings": (text_warnings, []),
     "text-rich": (text_rich, []),
+    "text-illustrated": (text_illustrated, ["--max-size", "60"]),
 }
 
 

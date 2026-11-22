@@ -357,3 +357,104 @@ def test_anchor_links_match_headings_case_insensitively_like_github(tmp_path):
     write_md(folder / "b.md", "# Part Two\n")
     assert build(folder).links(chapter_path(1)) == [
         ("上", f"{chapter_path(1)}#intro"), ("下", f"{chapter_path(2)}#part-two")]
+
+
+# --- 插圖 ------------------------------------------------------------------------
+
+@pytest.fixture
+def illustrated(tmp_path):
+    folder = tmp_path / "pages"
+    write_md(folder / "a.md", "# 甲\n\n![地圖](images/map.png)\n\n![](../shared/logo.JPG)\n")
+    write_md(folder / "第一部" / "b.md", "# 乙\n\n![同一張](../images/map.png) ![近照](pic.gif)\n")
+    make_image(folder / "images" / "map.png", fmt="PNG")
+    make_image(folder / "images" / "unused.jpg")
+    make_image(folder / "第一部" / "pic.gif", fmt="GIF")
+    make_image(tmp_path / "shared" / "logo.JPG", fmt="JPEG")
+    return folder
+
+
+def test_referenced_illustrations_are_packaged_once_and_shown_in_place(illustrated):
+    book = build(illustrated)
+    packaged = book.illustrations()
+    assert len(packaged) == 3
+    a_images = book.chapter_images(chapter_path(1))
+    b_images = book.chapter_images(chapter_path(2))
+    assert [alt for _, alt in a_images + b_images] == ["地圖", "", "同一張", "近照"]
+    map_path, logo_path = (path for path, _ in a_images)
+    assert b_images[0][0] == map_path
+    assert {map_path, logo_path, b_images[1][0]} == set(packaged)
+    assert map_path.endswith(".png") and logo_path.endswith(".jpg") and b_images[1][0].endswith(".gif")
+    assert book.zip.read(logo_path) == (illustrated.parent / "shared" / "logo.JPG").read_bytes()
+
+
+def test_unreferenced_images_are_not_packaged(illustrated):
+    book = build(illustrated)
+    names = book.zip.namelist()
+    assert not any("unused" in n for n in names)
+    assert len([n for n in names if n.lower().endswith((".png", ".jpg", ".gif", ".webp"))]) == 3
+
+
+def illustration_sizes(book):
+    from PIL import Image
+    import io
+    return {path.rsplit(".", 1)[-1]: Image.open(io.BytesIO(book.zip.read(path))).size
+            for path in book.illustrations()}
+
+
+@pytest.mark.parametrize("args, expected", [
+    ([], {"jpg": (80, 120)}),
+    (["--keep-webp"], {"webp": (80, 120)}),
+    (["--max-size", "60"], {"jpg": (40, 60)}),
+])
+def test_image_options_apply_to_illustrations_like_comics(tmp_path, args, expected):
+    folder = tmp_path / "pages"
+    write_md(folder / "a.md", "![圖](a.webp)\n")
+    make_image(folder / "a.webp", fmt="WEBP")
+    assert illustration_sizes(build(folder, *args)) == expected
+
+
+def test_quality_recompresses_illustrations(tmp_path):
+    folder = tmp_path / "pages"
+    write_md(folder / "a.md", "![圖](a.jpg)\n")
+    make_image(folder / "a.jpg", size=(400, 400))
+    original = (folder / "a.jpg").read_bytes()
+    book = build(folder, "--quality", "10")
+    assert book.zip.read(book.illustrations()[0]) != original
+
+
+@pytest.mark.parametrize("prepare", ["missing", "broken"])
+def test_a_missing_or_broken_illustration_is_an_error_by_default(tmp_path, capsys, prepare):
+    folder = tmp_path / "pages"
+    write_md(folder / "a.md", "# 甲\n\n![壞圖](images/bad.png)\n")
+    if prepare == "broken":
+        (folder / "images").mkdir()
+        (folder / "images" / "bad.png").write_bytes(b"not a png")
+    assert main([str(folder)]) == 1
+    err = capsys.readouterr().err
+    assert "images/bad.png" in err and "--skip-broken" in err
+    assert not (tmp_path / "pages.epub").exists()
+
+
+def test_skip_broken_shows_alt_text_and_lists_skipped_illustrations(tmp_path, capsys):
+    folder = tmp_path / "pages"
+    write_md(folder / "a.md", "# 甲\n\n前![壞圖](bad.png)後 ![](gone.jpg)\n")
+    write_md(folder / "b.md", "# 乙\n\n![又一次](bad.png)\n")
+    (folder / "bad.png").write_bytes(b"not a png")
+    book = build(folder, "--skip-broken")
+    assert book.illustrations() == []
+    assert "前壞圖後 gone.jpg" in book.chapter_body_text(chapter_path(1))
+    err = capsys.readouterr().err
+    assert "已跳過 2 張" in err
+    assert "a.md：bad.png" in err and "a.md：gone.jpg" in err
+
+
+def test_web_and_svg_illustrations_show_alt_text_with_warnings(tmp_path, capsys):
+    folder = tmp_path / "pages"
+    write_md(folder / "a.md", "# 甲\n\n![網圖](https://example.com/a.png) ![向量](a.svg)\n")
+    (folder / "a.svg").write_text("<svg/>", encoding="utf-8")
+    book = build(folder)
+    assert book.illustrations() == []
+    assert not any(n.endswith(".svg") for n in book.zip.namelist())
+    assert "網圖 向量" in book.chapter_body_text(chapter_path(1))
+    err = capsys.readouterr().err
+    assert "a.md：網路圖片不會下載" in err and "a.md：不支援的插圖格式" in err

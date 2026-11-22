@@ -14,7 +14,8 @@ from .errors import BrokenImageError, EpubgenError
 from .layout import page_viewports
 from .images import ImageSettings, PageImage, cover_as_jpeg, load_image
 from .metadata import is_valid_language, safe_file_name
-from .links import BookLinks, LinkedChapter
+from .illustrations import Illustrations
+from .targets import BookTargets, LinkedChapter
 from .markdown import RenderedChapter, render_markdown
 from .scan import IMAGE_EXTENSIONS, Book, is_text_book, scan_book, scan_text_book
 
@@ -121,10 +122,12 @@ def _build_text_book(input_dir: Path, folder: Path, title: str, destination: Pat
     if not non_empty:
         raise EpubgenError(f"資料夾裡沒有任何有內容的章：{input_dir}")
     # 章的編號與 write_text_epub 相同：依閱讀順序、只算有內容的章。
-    links = BookLinks({
+    illustrations = Illustrations(ImageSettings(options.keep_webp, options.quality, options.max_size),
+                                  options.skip_broken)
+    targets = BookTargets({
         chapter.source.resolve(): LinkedChapter(chapter_file_name(i), frozenset(chapter.first_pass.anchors))
         for i, chapter in enumerate(non_empty, start=1)
-    })
+    }, illustrations)
 
     chapters = []
     warnings = []
@@ -132,14 +135,15 @@ def _build_text_book(input_dir: Path, folder: Path, title: str, destination: Pat
         if chapter.first_pass.is_empty:
             warnings.append(f"{chapter.name}：沒有內容（空檔案或只有 front matter），已略過")
             continue
-        rendered = render_markdown(chapter.text, links.for_chapter(chapter.source))
+        rendered = render_markdown(chapter.text, targets.for_chapter(chapter.source, chapter.name))
         warnings.extend(f"{chapter.name}：{reason}" for reason in rendered.warnings)
         chapters.append(TextChapter(title=rendered.title or chapter.source.stem, body=rendered.body, part=chapter.part))
     book = TextBookSpec(title=title, language=options.language, chapters=tuple(chapters),
-                        author=options.author)
+                        author=options.author, illustrations=tuple(illustrations.images))
     _write_atomically(lambda tmp: write_text_epub(book, tmp), destination, options.force)
     return BuildResult(output=destination, page_count=0, kind=BookKind.TEXT,
-                       chapter_count=len(chapters), warnings=tuple(warnings))
+                       chapter_count=len(chapters), warnings=tuple(warnings),
+                       skipped=tuple(illustrations.skipped))
 
 
 def _read_chapter(folder: Path, part: str | None, source: Path) -> _SourceChapter:
