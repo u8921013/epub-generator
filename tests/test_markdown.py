@@ -229,3 +229,108 @@ def test_punctuation_shared_with_western_text_keeps_whitespace_in_western_text(m
 def test_an_image_or_raw_html_next_to_a_soft_break_keeps_the_whitespace():
     assert "\n" in paragraph_text("中文![圖](a.png)\n中文\n")
     assert paragraph_text("中文<b>\n中文\n") == "中文<b>\n中文"
+
+
+# --- 標題錨點 --------------------------------------------------------------------
+
+def heading_ids(markdown: str) -> list:
+    root = parse(render_markdown(markdown, NoTargets()).body)
+    return [h.get("id") for h in root.iter() if h.tag[len(X):] in ("h1", "h2", "h3", "h4", "h5", "h6")]
+
+
+@pytest.mark.parametrize("heading, anchor", [
+    ("Hello World", "hello-world"),
+    ("第一章 開端", "第一章-開端"),
+    ("What's new? (v2.0)", "whats-new-v20"),
+    ("A -- B", "a----b"),
+    ("全形，標點！「引號」", "全形標點引號"),
+    ("\U0001f604 emoji", "-emoji"),
+    ("snake_case 與 kebab-case", "snake_case-與-kebab-case"),
+    ("**粗體** `Code` [連結](x.md)", "粗體-code-連結"),
+    ("Ünïcode ÄÖ", "ünïcode-äö"),
+    ("中文　全形空白", "中文全形空白"),
+])
+def test_heading_anchors_follow_github(heading, anchor):
+    result = render_markdown(f"## {heading}\n", NoTargets())
+    assert result.anchors == (anchor,)
+    assert heading_ids(f"## {heading}\n") == [anchor]
+
+
+def test_repeated_heading_anchors_get_numbered_like_github():
+    markdown = "# A\n\n## A\n\n## A-1\n\n### A\n"
+    assert render_markdown(markdown, NoTargets()).anchors == ("a", "a-1", "a-1-1", "a-2")
+    assert heading_ids(markdown) == ["a", "a-1", "a-1-1", "a-2"]
+
+
+def test_a_heading_with_nothing_left_for_an_anchor_gets_no_id():
+    assert render_markdown("## !!!\n", NoTargets()).anchors == ()
+    assert heading_ids("## !!!\n") == [None]
+
+
+# --- 連結 ------------------------------------------------------------------------
+
+class Targets:
+    """假的目標解析器：只認得給定的連結，並記下被問過哪些目標。"""
+
+    def __init__(self, links):
+        self.links = links
+        self.asked = []
+
+    def link(self, target):
+        self.asked.append(target)
+        return self.links.get(target)
+
+    def image(self, target):
+        return None
+
+
+def links(body: str) -> list:
+    return [("".join(a.itertext()), a.get("href")) for a in parse(body).iter(f"{X}a")]
+
+
+def test_local_links_are_replaced_by_what_the_resolver_returns():
+    targets = Targets({"02.md": "chapter-0002.xhtml", "02.md#某標題": "chapter-0002.xhtml#某標題",
+                       "#本章": "#本章", "../第一部/01.md": "chapter-0001.xhtml"})
+    result = render_markdown(
+        "[見第二章](02.md)、[標題](02.md#某標題)、[本章](#本章)、[跨部](../第一部/01.md)\n", targets)
+    assert links(result.body) == [("見第二章", "chapter-0002.xhtml"), ("標題", "chapter-0002.xhtml#某標題"),
+                                  ("本章", "#本章"), ("跨部", "chapter-0001.xhtml")]
+    assert targets.asked == ["02.md", "02.md#某標題", "#本章", "../第一部/01.md"]
+    assert result.warnings == ()
+
+
+def test_targets_are_given_to_the_resolver_decoded():
+    targets = Targets({"第 2 章.md#a b": "chapter-0002.xhtml#a"})
+    result = render_markdown("[x](<第 2 章.md#a b>) [y](%E7%AC%AC%202%20%E7%AB%A0.md#a%20b)\n", targets)
+    assert [href for _, href in links(result.body)] == ["chapter-0002.xhtml#a", "chapter-0002.xhtml#a"]
+
+
+def test_unresolved_links_become_their_text_with_a_warning_each():
+    result = render_markdown("# 章\n\n前 [**失效**](nope.md#x) 後\n[檔案](a.pdf)\n", NoTargets())
+    root = parse(result.body)
+    assert root.find(f".//{X}a") is None
+    assert "".join(root.find(f"{X}p").itertext()) == "前 失效 後檔案"
+    assert root.find(f".//{X}strong").text == "失效"
+    assert result.warnings == ("失效的連結已改成純文字：nope.md#x（第 3 行）",
+                               "失效的連結已改成純文字：a.pdf（第 4 行）")
+
+
+class Refuses:
+    def link(self, target):
+        raise AssertionError(f"外部連結不該交給解析器：{target}")
+
+    def image(self, target):
+        return None
+
+
+def test_links_with_a_scheme_are_kept_as_written():
+    result = render_markdown(
+        "[網站](https://example.com/a?b=1#c) <https://example.org> <me@example.com> [信](mailto:x@y.z)\n",
+        Refuses())
+    assert [href for _, href in links(result.body)] == [
+        "https://example.com/a?b=1#c", "https://example.org", "mailto:me@example.com", "mailto:x@y.z"]
+    assert result.warnings == ()
+
+
+def test_without_a_resolver_links_are_left_as_written():
+    assert links(render_markdown("[a](x.md#y)\n").body) == [("a", "x.md#y")]

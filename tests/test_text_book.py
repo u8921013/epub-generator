@@ -300,3 +300,60 @@ def test_no_fonts_are_embedded(novel):
     assert not [n for n in book.zip.namelist() if n.lower().endswith((".ttf", ".otf", ".woff", ".woff2"))]
     assert not [i for i in book.manifest().values() if "font" in i.get("media-type")]
     assert all("@font-face" not in book.zip.read(css).decode("utf-8") for css in book.stylesheet_paths())
+
+
+# --- 書內連結 --------------------------------------------------------------------
+
+@pytest.fixture
+def linked(tmp_path):
+    folder = tmp_path / "pages"
+    write_md(folder / "序.md", "# 序\n\n[第一章](第一部/01.md) [標題](第一部/01.md#開端-a) "
+                               "[本章](#前言) [外部](https://example.com/x)\n\n## 前言\n")
+    write_md(folder / "第一部" / "01.md", "# 第一章\n\n## 開端 A\n\n[回序](../序.md#序) "
+                                         "[跨部](../第二部/深/02.md#同名-1) [自己](01.md)\n")
+    write_md(folder / "第二部" / "深" / "02.md", "# 第二章\n\n## 同名\n\n## 同名\n")
+    return folder
+
+
+def test_links_between_markdown_files_point_at_chapters_and_headings(linked):
+    book = build(linked)
+    assert book.links(chapter_path(1)) == [
+        ("第一章", chapter_path(2)), ("標題", f"{chapter_path(2)}#開端-a"),
+        ("本章", f"{chapter_path(1)}#前言"), ("外部", "https://example.com/x")]
+    assert book.links(chapter_path(2)) == [
+        ("回序", f"{chapter_path(1)}#序"), ("跨部", f"{chapter_path(3)}#同名-1"), ("自己", chapter_path(2))]
+
+
+def test_link_anchors_exist_as_heading_ids(linked):
+    book = build(linked)
+    for chapter in book.page_paths():
+        for _text, target in book.links(chapter):
+            path, _, fragment = target.partition("#")
+            if fragment:
+                assert fragment in book.ids(path)
+    assert book.ids(chapter_path(3)) == ["第二章", "同名", "同名-1"]
+
+
+def test_broken_links_become_text_with_a_warning_naming_the_file(tmp_path, capsys):
+    folder = tmp_path / "pages"
+    write_md(folder / "a.md", "# 甲\n\n[無檔](nope.md) [無錨](b.md#nope) [本章無錨](#nope)\n"
+                              "[非 md](doc.pdf) [空章](empty.md) [好](b.md#乙)\n")
+    write_md(folder / "b.md", "# 乙\n")
+    write_md(folder / "empty.md", "")
+    (folder / "doc.pdf").write_bytes(b"%PDF")
+    book = build(folder)
+    assert book.links(chapter_path(1)) == [("好", f"{chapter_path(2)}#乙")]
+    assert "無檔 無錨 本章無錨" in book.chapter_body_text(chapter_path(1))
+    warnings = [line for line in capsys.readouterr().err.splitlines() if "失效的連結" in line]
+    assert [w.split("：")[-1] for w in warnings] == [
+        "nope.md（第 3 行）", "b.md#nope（第 3 行）", "#nope（第 3 行）",
+        "doc.pdf（第 4 行）", "empty.md（第 4 行）"]
+    assert all("a.md" in w for w in warnings)
+
+
+def test_anchor_links_match_headings_case_insensitively_like_github(tmp_path):
+    folder = tmp_path / "pages"
+    write_md(folder / "a.md", "# Intro\n\n[上](#INTRO) [下](b.md#Part-Two)\n")
+    write_md(folder / "b.md", "# Part Two\n")
+    assert build(folder).links(chapter_path(1)) == [
+        ("上", f"{chapter_path(1)}#intro"), ("下", f"{chapter_path(2)}#part-two")]

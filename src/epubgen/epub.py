@@ -220,9 +220,15 @@ class TextBookSpec:
     author: str | None = None
 
 
+def chapter_file_name(index: int) -> str:
+    """第 index 章（從 1 起算）XHTML 的檔名；依閱讀順序編號，與來源檔名無關。
+    所有章放在同一個資料夾，章與章之間以這個檔名互連。"""
+    return f"chapter-{index:04d}.xhtml"
+
+
 def _chapter_href(index: int) -> str:
-    """第 index 章（從 1 起算）相對 OEBPS 的路徑；檔名依閱讀順序編號，與來源檔名無關。"""
-    return f"text/chapter-{index:04d}.xhtml"
+    """第 index 章相對 OEBPS 的路徑。"""
+    return f"text/{chapter_file_name(index)}"
 
 
 _STYLESHEET_HREF = "styles/book.css"

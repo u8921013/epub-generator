@@ -65,9 +65,9 @@ def text_parts(folder):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
 
-    md("序.md", "# 序\n\n前言。\n")
-    md("第2部 A&B/1.md", "# 第1章\n\n內容。\n")
-    md("第2部 A&B/深/2.md", "# 第2章 <x>\n\n內容。\n")
+    md("序.md", "# 序\n\n前言，見[第二章](第2部%20A&B/深/2.md#重複-1)與[本章](#小節-a)。\n\n## 小節 A\n")
+    md("第2部 A&B/1.md", "# 第1章\n\n[回序](../序.md)、[失效](nope.md)、[外部](https://example.com)。\n")
+    md("第2部 A&B/深/2.md", "# 第2章 <x>\n\n## 重複\n\n## 重複\n\n[第一章](../1.md#第1章)\n")
     md("第10部/1.md", "沒有標題。\n")
     make_image(folder / "插圖" / "1.jpg")
 

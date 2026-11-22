@@ -101,6 +101,22 @@ class Epub:
         body = self.chapter_root(chapter_path).find("x:body", NS)
         return "".join(body.itertext())
 
+    def links(self, chapter_path: str) -> list:
+        """章內所有連結的（文字, 目標）。書內連結的目標換成 zip 內路徑（可帶 #錨點），外部連結原樣。"""
+        base = chapter_path.rpartition("/")[0]
+        out = []
+        for a in self.chapter_root(chapter_path).iter("{%s}a" % NS["x"]):
+            href = a.get("href")
+            if ":" not in href.split("#")[0]:
+                path, _, fragment = href.partition("#")
+                href = (self.resolve(path, base) if path else chapter_path) + (f"#{fragment}" if fragment else "")
+            out.append(("".join(a.itertext()), href))
+        return out
+
+    def ids(self, chapter_path: str) -> list:
+        """章內所有元素的 id，依出現順序。"""
+        return [e.get("id") for e in self.chapter_root(chapter_path).iter() if e.get("id")]
+
     def chapter_headings(self, chapter_path: str, tag: str) -> list:
         """章內某一級標題（例如 "h1"）的純文字，依出現順序。"""
         return ["".join(h.itertext()) for h in self.chapter_root(chapter_path).iter("{%s}%s" % (NS["x"], tag))]

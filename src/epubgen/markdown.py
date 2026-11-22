@@ -5,7 +5,9 @@
 """
 
 import re
-from collections.abc import Iterable
+import unicodedata
+from collections.abc import Iterable, Iterator
+from urllib.parse import unquote
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -30,6 +32,7 @@ class RenderedChapter:
     body: str  # 章的 XHTML 內文片段（可能有多個最上層元素）
     is_empty: bool = False  # 略過 front matter 後沒有任何內容
     warnings: tuple[str, ...] = ()  # 給作者看的原因，不含檔名（由呼叫端加上）
+    anchors: tuple[str, ...] = ()  # 這一章所有標題的錨點名稱（即標題的 id），依出現順序
 
 
 # 開頭 `---` 單獨一行、到下一個單獨一行的 `---` 為止；沒有結束行就不算 front matter。
@@ -135,34 +138,112 @@ def _escaped_html_inline(self, tokens: list[Token], idx: int, options, env) -> s
 
 
 def render_markdown(text: str, resolver: TargetResolver | None = None) -> RenderedChapter:
+    """轉譯一個檔案。沒有給解析器時連結原樣輸出，用來先取得章名、錨點與是否為空。"""
     md = _parser()
     front_matter = _FRONT_MATTER.match(text)
     skipped_lines = front_matter.group().count("\n") if front_matter else 0
     tokens = md.parse(text[front_matter.end():] if front_matter else text)
     _mark_cjk_soft_breaks(tokens)
+    anchors = _assign_heading_anchors(tokens)
     warnings = []
     html_lines = [line + skipped_lines for line in _raw_html_lines(tokens)]
     if html_lines:
         lines = "、".join(str(n) for n in sorted(set(html_lines)))
         warnings.append(f"原始 HTML 已轉義成純文字（第 {lines} 行）")
+    if resolver is not None:
+        for line, target in _resolve_links(tokens, resolver):
+            warnings.append(f"失效的連結已改成純文字：{target}（第 {line + skipped_lines} 行）")
     return RenderedChapter(title=_first_h1_text(tokens), body=md.renderer.render(tokens, md.options, {}),
-                           is_empty=not tokens, warnings=tuple(warnings))
+                           is_empty=not tokens, warnings=tuple(warnings), anchors=tuple(anchors))
+
+
+# --- 標題錨點 --------------------------------------------------------------------
+# 依 github-slugger（模仿 GitHub 的標題錨點，GitHub 與 VS Code 預覽的結果相同）：
+# 轉小寫；移除標點、符號、控制字元、其他數字與空白以外的分隔字元（字母一律保留）；
+# 保留字母、組合記號、十進位數字、`_`、`-`；空白換成 `-`。查證出處見票 07。
+_SLUG_REMOVED_CATEGORIES = frozenset((
+    "No", "Ps", "Pe", "Pi", "Pf", "Po", "Pd",
+    "Sm", "Sc", "Sk", "So", "Cc", "Cf", "Co", "Cn", "Zs", "Zl", "Zp",
+))
+
+
+def _slug(text: str) -> str:
+    kept = (char for char in text.lower()
+            if char in " -" or char.isalpha() or unicodedata.category(char) not in _SLUG_REMOVED_CATEGORIES)
+    return "".join(kept).replace(" ", "-")
+
+
+def _assign_heading_anchors(tokens: list[Token]) -> list[str]:
+    """給每個標題 id，回傳所有錨點。重複的名稱依序加 -1、-2，並避開已用過的名稱
+    （例如已有 a-1 時，第三個 a 成為 a-2）。什麼都不剩的標題不給 id。"""
+    used: dict[str, int] = {}
+    anchors = []
+    for i, token in enumerate(tokens):
+        if token.type != "heading_open":
+            continue
+        base = _slug(_anchor_text(tokens[i + 1]))
+        if not base:
+            continue
+        anchor = base
+        while anchor in used:
+            used[base] += 1
+            anchor = f"{base}-{used[base]}"
+        used[anchor] = 0
+        token.attrSet("id", anchor)
+        anchors.append(anchor)
+    return anchors
+
+
+def _anchor_text(inline: Token) -> str:
+    """標題在 HTML 裡的文字：文字與行內程式碼；圖片的替代文字不算。"""
+    return "".join(child.content for child in inline.children or () if child.type in ("text", "code_inline"))
+
+
+def _inline_children_with_lines(tokens: list[Token]) -> Iterator[tuple[int, Token]]:
+    """依序走訪所有行內 token，附上所在行號（從 1 起算，相對於傳給解析器的文字）。
+
+    行號以段落起始行加上之前的換行數推算；換行出現在行內程式碼裡時會略有偏差。
+    """
+    for token in tokens:
+        if token.type == "inline" and token.map:
+            line = token.map[0] + 1
+            for child in token.children or ():
+                yield line, child
+                if child.type in ("softbreak", "hardbreak"):
+                    line += 1
 
 
 def _raw_html_lines(tokens: list[Token]) -> list[int]:
-    """原始 HTML 出現的行號（從 1 起算，相對於傳給解析器的文字）。"""
-    lines = []
-    for token in tokens:
-        if token.type == "html_block" and token.map:
-            lines.append(token.map[0] + 1)
-        elif token.type == "inline" and token.map:
-            line = token.map[0] + 1
-            for child in token.children or ():
-                if child.type in ("softbreak", "hardbreak"):
-                    line += 1
-                elif child.type == "html_inline":
-                    lines.append(line)
+    """原始 HTML 出現的行號。"""
+    lines = [token.map[0] + 1 for token in tokens if token.type == "html_block" and token.map]
+    lines += [line for line, child in _inline_children_with_lines(tokens) if child.type == "html_inline"]
     return lines
+
+
+# 有 scheme 的連結（https:、mailto: 等）是外部連結，原樣保留。
+_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
+
+
+def _resolve_links(tokens: list[Token], resolver: TargetResolver) -> list[tuple[int, str]]:
+    """把本地連結換成解析器給的書內 href；解析不了的連結只留文字。回傳失效連結的（行號, 目標）。"""
+    broken = []
+    dropping = False  # 連結不會巢狀，所以只要記得目前這個連結是不是被拿掉了
+    for line, child in _inline_children_with_lines(tokens):
+        if child.type == "link_open":
+            href = str(child.attrGet("href") or "")
+            if _SCHEME.match(href):
+                continue
+            target = unquote(href)
+            resolved = resolver.link(target)
+            if resolved is None:
+                child.hidden = dropping = True
+                broken.append((line, target))
+            else:
+                child.attrSet("href", resolved)
+        elif child.type == "link_close" and dropping:
+            child.hidden = True
+            dropping = False
+    return broken
 
 
 def _first_h1_text(tokens: list[Token]) -> str:

@@ -8,13 +8,14 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .epub import (DIRECTIONS, BookSpec, TextBookSpec, TextChapter, TocEntry, write_epub,
-                   write_text_epub)
+from .epub import (DIRECTIONS, BookSpec, TextBookSpec, TextChapter, TocEntry, chapter_file_name,
+                   write_epub, write_text_epub)
 from .errors import BrokenImageError, EpubgenError
 from .layout import page_viewports
 from .images import ImageSettings, PageImage, cover_as_jpeg, load_image
 from .metadata import is_valid_language, safe_file_name
-from .markdown import render_markdown
+from .links import BookLinks, LinkedChapter
+from .markdown import RenderedChapter, render_markdown
 from .scan import IMAGE_EXTENSIONS, Book, is_text_book, scan_book, scan_text_book
 
 DEFAULT_LANGUAGE = "zh-TW"
@@ -103,28 +104,51 @@ def _reject_comic_only_options(options: BuildOptions) -> None:
         raise EpubgenError(f"{'、'.join(used)} 只對漫畫書有效，不能用在文字書（Markdown 資料夾）")
 
 
+@dataclass(frozen=True)
+class _SourceChapter:
+    part: str | None
+    source: Path
+    name: str  # 相對於輸入資料夾的路徑，用在訊息裡
+    text: str
+    first_pass: RenderedChapter  # 不解析連結的第一次轉譯：只用它的是否為空與錨點
+
+
 def _build_text_book(input_dir: Path, folder: Path, title: str, destination: Path, options: BuildOptions) -> BuildResult:
+    # 兩階段：先讀完所有章、取得各章錨點，才能驗證跨章的錨點連結。
+    sources = [_read_chapter(folder, part, source)
+               for part, source in scan_text_book(folder).chapters_in_reading_order()]
+    non_empty = [chapter for chapter in sources if not chapter.first_pass.is_empty]
+    if not non_empty:
+        raise EpubgenError(f"資料夾裡沒有任何有內容的章：{input_dir}")
+    # 章的編號與 write_text_epub 相同：依閱讀順序、只算有內容的章。
+    links = BookLinks({
+        chapter.source.resolve(): LinkedChapter(chapter_file_name(i), frozenset(chapter.first_pass.anchors))
+        for i, chapter in enumerate(non_empty, start=1)
+    })
+
     chapters = []
     warnings = []
-    for part_title, source in scan_text_book(folder).chapters_in_reading_order():
-        name = source.relative_to(folder).as_posix()
-        try:
-            text = source.read_text(encoding="utf-8-sig")
-        except (OSError, UnicodeDecodeError) as exc:
-            raise EpubgenError(f"無法讀取 Markdown 檔（需要 UTF-8）：{name}") from exc
-        rendered = render_markdown(text)
-        warnings.extend(f"{name}：{reason}" for reason in rendered.warnings)
-        if rendered.is_empty:
-            warnings.append(f"{name}：沒有內容（空檔案或只有 front matter），已略過")
+    for chapter in sources:
+        if chapter.first_pass.is_empty:
+            warnings.append(f"{chapter.name}：沒有內容（空檔案或只有 front matter），已略過")
             continue
-        chapters.append(TextChapter(title=rendered.title or source.stem, body=rendered.body, part=part_title))
-    if not chapters:
-        raise EpubgenError(f"資料夾裡沒有任何有內容的章：{input_dir}")
+        rendered = render_markdown(chapter.text, links.for_chapter(chapter.source))
+        warnings.extend(f"{chapter.name}：{reason}" for reason in rendered.warnings)
+        chapters.append(TextChapter(title=rendered.title or chapter.source.stem, body=rendered.body, part=chapter.part))
     book = TextBookSpec(title=title, language=options.language, chapters=tuple(chapters),
                         author=options.author)
     _write_atomically(lambda tmp: write_text_epub(book, tmp), destination, options.force)
     return BuildResult(output=destination, page_count=0, kind=BookKind.TEXT,
                        chapter_count=len(chapters), warnings=tuple(warnings))
+
+
+def _read_chapter(folder: Path, part: str | None, source: Path) -> _SourceChapter:
+    name = source.relative_to(folder).as_posix()
+    try:
+        text = source.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise EpubgenError(f"無法讀取 Markdown 檔（需要 UTF-8）：{name}") from exc
+    return _SourceChapter(part, source, name, text, render_markdown(text))
 
 
 def _build_comic(input_dir: Path, folder: Path, title: str, destination: Path, options: BuildOptions,
