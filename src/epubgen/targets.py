@@ -35,13 +35,12 @@ class ChapterTargets:
         self._source = source
         self._name = name
 
-    def link(self, target: str) -> str | None:
-        path, _, fragment = target.partition("#")
+    def link(self, path: str, fragment: str) -> str | None:
         if not path:  # 只有 #錨點：同章內跳轉
             anchor = _find_anchor(self._chapters[self._source], fragment)
             return None if anchor is None else f"#{anchor}"
-        chapter = self._chapters.get((self._source.parent / path).resolve())
-        if chapter is None:  # 不存在、不是 Markdown、或是空章
+        chapter = self._chapters.get(_resolved(self._source.parent / path))
+        if chapter is None:  # 不存在、不是 Markdown、是空章、或根本不是合法路徑
             return None
         if not fragment:
             return chapter.file_name
@@ -50,6 +49,14 @@ class ChapterTargets:
 
     def image(self, target: str) -> str | None:
         return self._illustrations.href(self._source.parent / target, f"{self._name}：{target}")
+
+
+def _resolved(path: Path) -> Path | None:
+    """絕對路徑；路徑不合法（例如 %00 解碼出的 NUL 字元）時回傳 None。"""
+    try:
+        return path.resolve()
+    except (OSError, ValueError):
+        return None
 
 
 def _find_anchor(chapter: LinkedChapter, fragment: str) -> str | None:

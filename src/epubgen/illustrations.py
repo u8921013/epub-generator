@@ -23,24 +23,26 @@ class Illustrations:
 
         name 是訊息裡顯示的名稱。
         """
-        key = path.resolve()
+        try:
+            key = path.resolve()
+        except (OSError, ValueError):  # 不是合法路徑（例如 %00 解碼出的 NUL 字元）：當作找不到
+            return self._unusable(f"找不到插圖：{name}", name)
         if key not in self._href_of:
             self._href_of[key] = self._load(path, name)
         return self._href_of[key]
 
     def _load(self, path: Path, name: str) -> str | None:
-        image = problem = None
         if not path.is_file():
-            problem = f"找不到插圖：{name}"
-        else:
-            try:
-                image = load_image(path, name, self._settings)
-            except BrokenImageError as exc:
-                problem = str(exc)
-        if image is None:
-            if not self._skip_broken:
-                raise EpubgenError(f"{problem}（要跳過找不到或損毀的插圖請加上 --skip-broken）")
-            self.skipped.append(name)
-            return None
+            return self._unusable(f"找不到插圖：{name}", name)
+        try:
+            image = load_image(path, name, self._settings)
+        except BrokenImageError as exc:
+            return self._unusable(str(exc), name)
         self.images.append(image)
         return illustration_href(len(self.images), image)
+
+    def _unusable(self, problem: str, name: str) -> None:
+        """預設報錯；skip_broken 時記到跳過清單。"""
+        if not self._skip_broken:
+            raise EpubgenError(f"{problem}（要跳過找不到或損毀的插圖請加上 --skip-broken）")
+        self.skipped.append(name)

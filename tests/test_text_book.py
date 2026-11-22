@@ -151,6 +151,43 @@ def test_markdown_inside_a_hidden_folder_does_not_turn_a_comic_into_a_text_book(
     assert spine_direction(Epub(tmp_path / "comic.epub")) == "rtl"
 
 
+def test_images_in_the_root_and_markdown_only_in_a_subfolder_make_a_text_book_without_the_images(tmp_path):
+    folder = tmp_path / "pages"
+    make_image(folder / "1.jpg")
+    write_md(folder / "上" / "a.md", "# 甲\n")
+    book = build(folder)
+    assert spine_direction(book) == "ltr"
+    assert book.toc() == [("上", 1, chapter_path(1)), ("甲", 2, chapter_path(1))]
+    assert book.illustrations() == []
+
+
+def test_a_broken_markdown_symlink_does_not_turn_a_comic_into_a_text_book(tmp_path, capsys):
+    folder = tmp_path / "comic"
+    make_image(folder / "1.jpg")
+    (folder / "broken.md").symlink_to(tmp_path / "nowhere.md")
+    assert main([str(folder)]) == 0
+    assert "共 1 頁" in capsys.readouterr().out
+    assert spine_direction(Epub(tmp_path / "comic.epub")) == "rtl"
+
+
+def test_a_symlinked_folder_of_markdown_does_not_turn_a_comic_into_a_text_book(tmp_path, capsys):
+    folder = tmp_path / "comic"
+    make_image(folder / "1.jpg")
+    write_md(tmp_path / "elsewhere" / "b.md", "# 外\n")
+    (folder / "part1").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+    assert main([str(folder)]) == 0
+    assert "共 1 頁" in capsys.readouterr().out
+
+
+def test_a_symlinked_folder_does_not_become_a_part_of_a_text_book(tmp_path):
+    folder = tmp_path / "pages"
+    write_md(folder / "a.md", "# 甲\n")
+    write_md(tmp_path / "elsewhere" / "b.md", "# 外\n")
+    (folder / "part1").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+    (folder / "broken.md").symlink_to(tmp_path / "nowhere.md")
+    assert build(folder).toc() == [("甲", 1, chapter_path(1))]
+
+
 # --- 漫畫專用旗標 ---------------------------------------------------------------
 
 @pytest.mark.parametrize("flags", [["--direction", "rtl"], ["--direction", "ltr"], ["--spread"]])
@@ -168,6 +205,14 @@ def test_help_mentions_markdown_folders_and_comic_only_flags(capsys):
     out = " ".join(capsys.readouterr().out.split())
     assert "圖片或 Markdown 檔的資料夾" in out
     assert out.count("只對漫畫書有效") >= 2
+
+
+def test_help_says_a_text_book_has_no_cover_by_default_and_skip_broken_covers_missing_images(capsys):
+    with pytest.raises(SystemExit):
+        main(["--help"])
+    out = "".join(capsys.readouterr().out.split())
+    assert "漫畫書預設：第一頁；文字書預設：無封面" in out
+    assert "跳過找不到或損毀的圖片" in out
 
 
 def test_comic_only_flag_error_comes_before_the_existing_output_error(novel, capsys):
@@ -264,6 +309,18 @@ def test_empty_chapters_are_skipped_with_warnings_listed_at_the_end(tmp_path, ca
     assert "上/3.md" in warnings[1] and "沒有內容" in warnings[1]
 
 
+def test_a_part_whose_chapters_are_all_empty_is_left_out_of_the_toc(tmp_path, capsys):
+    folder = tmp_path / "pages"
+    write_md(folder / "上" / "1.md", "# 甲\n")
+    write_md(folder / "中" / "2.md", "")
+    write_md(folder / "中" / "深" / "3.md", "---\na: 1\n---\n")
+    write_md(folder / "下" / "4.md", "# 乙\n")
+    book = build(folder)
+    assert book.toc() == [("上", 1, chapter_path(1)), ("甲", 2, chapter_path(1)),
+                          ("下", 1, chapter_path(2)), ("乙", 2, chapter_path(2))]
+    assert "共 2 章" in capsys.readouterr().out
+
+
 def test_a_folder_of_only_empty_chapters_is_an_error(tmp_path, capsys):
     folder = tmp_path / "pages"
     write_md(folder / "1.md", "\n\n")
@@ -281,6 +338,14 @@ def test_raw_html_is_shown_as_text_and_warned_about_with_the_file_name(tmp_path,
     assert "<div>區塊</div>" in text and "<span>行內</span>" in text
     err = capsys.readouterr().err
     assert "a.md" in err and "原始 HTML" in err and "第 3、5 行" in err
+
+
+def test_characters_xml_forbids_do_not_break_the_chapter_xhtml(tmp_path):
+    folder = tmp_path / "pages"
+    write_md(folder / "a.md", "# 標\x0c題\n\nhello \x0b world\x01\n")
+    book = build(folder)  # chapter_root 解析失敗即代表不是格式正確的 XHTML
+    assert "hello \ufffd world\ufffd" in book.chapter_body_text(chapter_path(1))
+    assert book.nav_links()[0][0] == "標\ufffd題"
 
 
 # --- 內建樣式 --------------------------------------------------------------------
@@ -357,6 +422,28 @@ def test_anchor_links_match_headings_case_insensitively_like_github(tmp_path):
     write_md(folder / "b.md", "# Part Two\n")
     assert build(folder).links(chapter_path(1)) == [
         ("上", f"{chapter_path(1)}#intro"), ("下", f"{chapter_path(2)}#part-two")]
+
+
+def test_links_to_file_names_with_spaces_or_a_hash_are_decoded_before_resolving(tmp_path, capsys):
+    folder = tmp_path / "pages"
+    write_md(folder / "a.md", "# 甲\n\n[空白](第%202%20章.md) [角括號](<第 2 章.md#乙>) "
+                              "[井號](C%23.md#c-語言) [查詢](第%202%20章.md?x=1)\n")
+    write_md(folder / "第 2 章.md", "# 乙\n")
+    write_md(folder / "C#.md", "# C# 語言\n")
+    book = build(folder)
+    assert book.links(chapter_path(1)) == [
+        ("空白", chapter_path(3)), ("角括號", f"{chapter_path(3)}#乙"), ("井號", f"{chapter_path(2)}#c-語言")]
+    warnings = [line for line in capsys.readouterr().err.splitlines() if "失效的連結" in line]
+    assert [w.split("：")[-1] for w in warnings] == ["第 2 章.md?x=1（第 3 行）"]
+
+
+def test_an_encoded_nul_in_a_link_is_a_broken_link_not_a_crash(tmp_path, capsys):
+    folder = tmp_path / "pages"
+    write_md(folder / "a.md", "# 甲\n\n[壞](a%00b.md) [錨](a%00b.md#x)\n")
+    book = build(folder)
+    assert book.links(chapter_path(1)) == []
+    assert "壞 錨" in book.chapter_body_text(chapter_path(1))
+    assert capsys.readouterr().err.count("失效的連結") == 2
 
 
 # --- 插圖 ------------------------------------------------------------------------
@@ -446,6 +533,18 @@ def test_skip_broken_shows_alt_text_and_lists_skipped_illustrations(tmp_path, ca
     err = capsys.readouterr().err
     assert "已跳過 2 張" in err
     assert "a.md：bad.png" in err and "a.md：gone.jpg" in err
+
+
+def test_an_encoded_nul_in_an_illustration_path_is_a_missing_illustration(tmp_path, capsys):
+    folder = tmp_path / "pages"
+    write_md(folder / "a.md", "# 甲\n\n前![壞圖](a%00b.png)後\n")
+    assert main([str(folder)]) == 1
+    err = capsys.readouterr().err
+    assert "找不到插圖" in err and "--skip-broken" in err and "Traceback" not in err
+    assert not (tmp_path / "pages.epub").exists()
+    book = build(folder, "--skip-broken")
+    assert "前壞圖後" in book.chapter_body_text(chapter_path(1))
+    assert "已跳過 1 張" in capsys.readouterr().err
 
 
 def test_web_and_svg_illustrations_show_alt_text_with_warnings(tmp_path, capsys):

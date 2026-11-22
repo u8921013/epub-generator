@@ -54,6 +54,8 @@
 - 「是否為字母」用 Python `str.isalpha()` 判斷，不是 Unicode 的 Alphabetic 屬性。差別只在少數屬於符號類、但 Unicode 仍算字母的字元，例如 Ⓐ、🄰：github-slugger 保留，這裡移除。
 - 標題經過處理後一個字都不剩時（例如 `## 😀`），不給 id。github-slugger 會給空字串，第二個同名的給 `-1`。
 
+多行標題（Setext 或含硬換行）的錨點：兩行之間的換行不算空白，`Hello⏎World` 的錨點是 `helloworld`，而目錄章名顯示 `Hello World`。這是刻意的：html-pipeline 的 `/[^\p{Word}\- ]/u` 與 github-slugger 的 Control 類別都會移除換行字元。2026-11-22 code review 第 5 項建議改成 `hello-world`，評估後維持現狀，以免 GitHub 預覽寫好的連結失效。
+
 ### 連結
 
 - 解析分兩階段：
@@ -66,6 +68,6 @@
 - 錨點比對先找完全相同的。找不到時，跟 GitHub 一樣改用小寫再找一次，例如 `#Intro` 可以找到 `intro`。
 - 中文錨點直接寫進 href，不做百分比編碼；EPUBCheck 沒有錯誤。
 - 審查記下但未處理：
-  - 章的編號在建書與寫出 EPUB 兩處各算一次，目前由連結測試確保一致。
+  - ~~章的編號在建書與寫出 EPUB 兩處各算一次~~：2026-11-22 code review 第 9 項已改為建書時決定一次檔名，由 `TextChapter.file_name` 帶給 EPUB 組裝。
   - 每章會解析兩次，234 章的小說仍在 0.5 秒內完成。
   - 指向同一個檔案的符號連結會被視為同一章。

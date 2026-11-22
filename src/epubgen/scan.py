@@ -86,11 +86,12 @@ def _visible_dirs(dirs: list[str]) -> list[str]:
 def is_text_book(folder: Path) -> bool:
     """資料夾任何位置有 Markdown 檔就是文字書，否則是漫畫書（ADR 0001）。
 
-    隱藏資料夾（例如 .git）裡的檔案不算。
+    隱藏資料夾（例如 .git）裡的檔案與壞掉的符號連結不算；跟 scan_text_book 一樣，
+    不走進指向資料夾的符號連結。
     """
-    for _root, dirs, names in os.walk(folder):
+    for root, dirs, names in os.walk(folder):
         dirs[:] = _visible_dirs(dirs)
-        if any(_is_markdown(Path(name)) for name in names):
+        if any(_is_markdown(p) and p.is_file() for p in (Path(root) / n for n in names)):
             return True
     return False
 
@@ -126,12 +127,13 @@ def scan_text_book(folder: Path) -> TextBook:
 
     根目錄的 md 是不屬於任何部的章，排在最前面；每個含 md 的第一層子資料夾
     成為一部，更深層的 md 併入所屬的第一層部。部與章都依名稱自然排序。
+    指向資料夾的符號連結不算部，跟更深層的 os.walk 與 is_text_book 一致。
     """
     entries = list(folder.iterdir())
     front = sorted((p for p in entries if p.is_file() and _is_markdown(p)),
                    key=lambda p: natural_key(p.name))
     parts = []
-    subfolders = (p for p in entries if p.is_dir() and not _is_hidden(p.name))
+    subfolders = (p for p in entries if p.is_dir() and not p.is_symlink() and not _is_hidden(p.name))
     for sub in sorted(subfolders, key=lambda p: natural_key(p.name)):
         chapters = _markdown_under(sub)
         if chapters:

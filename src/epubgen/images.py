@@ -171,6 +171,11 @@ def load_image(path: Path, name: str | None = None,
     return PageImage(data, kind, MEDIA_TYPES[kind], width, height)
 
 
+def kobo_safe_cover(image: PageImage, quality: int | None = None) -> PageImage:
+    """封面圖：GIF 另外轉成 JPEG（Kobo 不支援 GIF 封面），其他格式原樣回傳。"""
+    return cover_as_jpeg(image, quality) if image.extension == ".gif" else image
+
+
 def cover_as_jpeg(page: PageImage, quality: int | None = None) -> PageImage:
     """把 GIF 封面轉成 JPEG（Kobo 不支援 GIF 封面）。動畫只取第一個畫格，透明處合成到白底。"""
     with Image.open(io.BytesIO(page.data)) as img:

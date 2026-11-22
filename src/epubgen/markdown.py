@@ -22,8 +22,9 @@ from .scan import IMAGE_EXTENSIONS
 class TargetResolver(Protocol):
     """把 md 裡的相對路徑換成書內 href；找不到時回傳 None。"""
 
-    def link(self, target: str) -> str | None:
-        """連結目標（Markdown 檔，可帶 #錨點）。"""
+    def link(self, path: str, fragment: str) -> str | None:
+        """連結目標：Markdown 檔的路徑（只有 #錨點時為空字串）與錨點（沒有時為空字串），
+        兩者都已各自做過百分比解碼，所以檔名裡的 `#`（寫成 `%23`）不會被當成錨點。"""
 
     def image(self, target: str) -> str | None:
         """插圖路徑（只會問 JPEG、PNG、GIF、WebP）。回傳 None 時改顯示替代文字，不另外警告：
@@ -125,16 +126,17 @@ def _mark_cjk_soft_breaks(tokens: list[Token]) -> None:
 def _neighbor_text(siblings: Iterable[Token], outward_is_backward: bool) -> str:
     """軟換行一側緊鄰的那段文字，依離換行由近到遠的順序排列。
 
-    跳過粗體、連結等格式標記；碰到圖片、行內 HTML 等非文字內容就停下（回傳空字串）。
+    跳過粗體、連結等格式標記，把兩側的文字接起來（共用標點與後面的中文字可能分屬不同 token，
+    例如 `“**引號**”`）；碰到圖片、行內 HTML、換行等非文字內容就停下。
     """
+    parts = []
     for sibling in siblings:
         if sibling.nesting != 0:  # 粗體、斜體、連結等的開頭與結尾
             continue
         if sibling.type not in ("text", "code_inline"):
-            return ""
-        if sibling.content:
-            return sibling.content[::-1] if outward_is_backward else sibling.content
-    return ""
+            break
+        parts.append(sibling.content[::-1] if outward_is_backward else sibling.content)
+    return "".join(parts)
 
 
 def _escaped_html_block(self, tokens: list[Token], idx: int, options, env) -> str:
@@ -147,8 +149,14 @@ def _escaped_html_inline(self, tokens: list[Token], idx: int, options, env) -> s
     return escapeHtml(tokens[idx].content)
 
 
+# XML 1.0 不允許的字元（保留 \t、\n、\r）。markdown-it 只會把 NUL 換掉，其他的會原樣寫進 XHTML，
+# 讓閱讀器打不開；從網頁或 PDF 複製的文字偶爾夾帶 \x0b、\x0c。跟 CommonMark 處理 NUL 一樣換成 U+FFFD。
+_XML_ILLEGAL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
+
+
 def render_markdown(text: str, resolver: TargetResolver | None = None) -> RenderedChapter:
     """轉譯一個檔案。沒有給解析器時連結原樣輸出，用來先取得章名、錨點與是否為空。"""
+    text = _XML_ILLEGAL.sub("\ufffd", text)
     md = _parser()
     front_matter = _FRONT_MATTER.match(text)
     skipped_lines = front_matter.group().count("\n") if front_matter else 0
@@ -257,7 +265,10 @@ def _inline_children_with_lines(tokens: list[Token]) -> Iterator[tuple[int, Toke
 def _raw_html_lines(tokens: list[Token]) -> list[int]:
     """原始 HTML 出現的行號。"""
     lines = [token.map[0] + 1 for token in tokens if token.type == "html_block" and token.map]
-    lines += [line for line, child in _inline_children_with_lines(tokens) if child.type == "html_inline"]
+    for line, child in _inline_children_with_lines(tokens):
+        # 圖片替代文字裡的 HTML 在 image 的 children 裡。
+        nested = child.children or () if child.type == "image" else ()
+        lines += [line for token in (child, *nested) if token.type == "html_inline"]
     return lines
 
 
@@ -274,11 +285,11 @@ def _resolve_links(tokens: list[Token], resolver: TargetResolver) -> list[tuple[
             href = str(child.attrGet("href") or "")
             if _SCHEME.match(href):
                 continue
-            target = unquote(href)
-            resolved = resolver.link(target)
+            raw_path, _, raw_fragment = href.partition("#")
+            resolved = resolver.link(unquote(raw_path), unquote(raw_fragment))
             if resolved is None:
                 child.hidden = dropping = True
-                broken.append((line, target))
+                broken.append((line, unquote(href)))
             else:
                 child.attrSet("href", resolved)
         elif child.type == "link_close" and dropping:
@@ -296,10 +307,16 @@ def _first_h1_text(tokens: list[Token]) -> str:
 
 
 def _plain_text(inline: Token) -> str:
-    """行內 token 的純文字：保留文字與程式碼，去掉強調、連結等格式。"""
+    """行內 token 的純文字：保留文字與程式碼，去掉強調、連結等格式。
+
+    原始 HTML 在內文裡轉義成看得到的文字，這裡也照樣保留，目錄與內文才會一致。
+    """
     parts = []
     for child in inline.children or ():
-        if child.type in ("text", "code_inline", "image"):
+        if child.type == "image":
+            # 替代文字的格式在 children 裡；content 是未去格式的原文。
+            parts.append(_plain_text(child) if child.children else child.content)
+        elif child.type in ("text", "code_inline", "html_inline"):
             parts.append(child.content)
         elif child.type == "softbreak" and _is_joined(child):
             continue

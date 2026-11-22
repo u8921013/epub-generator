@@ -209,6 +209,7 @@ def write_epub(book: BookSpec, destination: Path) -> None:
 class TextChapter:
     title: str  # 章名，用於目錄與 <title>
     body: str  # 章的 XHTML 內文片段
+    file_name: str  # 章 XHTML 的檔名（見 chapter_file_name）；書內連結也指向它，所以由建書時決定一次
     part: str | None = None  # 所屬的部；None 表示根目錄的章
 
 
@@ -238,9 +239,9 @@ def chapter_file_name(index: int) -> str:
     return f"chapter-{index:04d}.xhtml"
 
 
-def _chapter_href(index: int) -> str:
-    """第 index 章相對 OEBPS 的路徑。"""
-    return f"text/{chapter_file_name(index)}"
+def _chapter_href(chapter: "TextChapter") -> str:
+    """章相對 OEBPS 的路徑。"""
+    return f"text/{chapter.file_name}"
 
 
 _STYLESHEET_HREF = "styles/book.css"
@@ -304,8 +305,8 @@ def _text_package_opf(book: TextBookSpec, identifier: str, modified: str) -> str
                         f' media-type="{book.cover.media_type}" properties="cover-image"/>')
         manifest.append(f'    <item id="cover" href="{_COVER_PAGE_HREF}" media-type="application/xhtml+xml"/>')
         spine.append('    <itemref idref="cover"/>')
-    for i, _chapter in enumerate(book.chapters, start=1):
-        manifest.append(f'    <item id="chapter-{i:04d}" href="{_chapter_href(i)}"'
+    for i, chapter in enumerate(book.chapters, start=1):
+        manifest.append(f'    <item id="chapter-{i:04d}" href="{_chapter_href(chapter)}"'
                         f' media-type="application/xhtml+xml"/>')
         spine.append(f'    <itemref idref="chapter-{i:04d}"/>')
     for i, image in enumerate(book.illustrations, start=1):
@@ -321,7 +322,7 @@ def _text_toc(chapters: tuple[TextChapter, ...]) -> list[NavEntry]:
 
     chapters 依閱讀順序排列，同一部的章彼此相鄰。
     """
-    entries = [(c.part, NavEntry(c.title, _chapter_href(i))) for i, c in enumerate(chapters, start=1)]
+    entries = [(c.part, NavEntry(c.title, _chapter_href(c))) for c in chapters]
     toc: list[NavEntry] = []
     for part, group in itertools.groupby(entries, key=lambda e: e[0]):
         members = [entry for _part, entry in group]
@@ -340,8 +341,8 @@ def write_text_epub(book: TextBookSpec, destination: Path) -> None:
         ("OEBPS/nav.xhtml", nav, zipfile.ZIP_DEFLATED),
         (f"OEBPS/{_STYLESHEET_HREF}", _STYLESHEET, zipfile.ZIP_DEFLATED),
     ]
-    for i, chapter in enumerate(book.chapters, start=1):
-        files.append((f"OEBPS/{_chapter_href(i)}", _chapter_xhtml(chapter, book.language),
+    for chapter in book.chapters:
+        files.append((f"OEBPS/{_chapter_href(chapter)}", _chapter_xhtml(chapter, book.language),
                       zipfile.ZIP_DEFLATED))
     for i, image in enumerate(book.illustrations, start=1):
         files.append((f"OEBPS/{_illustration_path(i, image)}", image.data, zipfile.ZIP_STORED))

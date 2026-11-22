@@ -10,7 +10,7 @@ from epubgen.markdown import render_markdown
 class NoTargets:
     """假的目標解析器：什麼都找不到。"""
 
-    def link(self, target):
+    def link(self, path, fragment):
         return None
 
     def image(self, target):
@@ -25,6 +25,16 @@ def parse(body: str) -> ET.Element:
 def test_title_is_the_plain_text_of_the_first_h1():
     result = render_markdown("# 第8章 **梁溪** _a_ `b`\n\n段落。\n", NoTargets())
     assert result.title == "第8章 梁溪 a b"
+
+
+def test_title_drops_the_formatting_inside_image_alt_text():
+    assert render_markdown("# 章 ![**粗**圖](a.png)\n", NoTargets()).title == "章 粗圖"
+
+
+def test_title_shows_raw_html_as_the_text_the_body_shows():
+    result = render_markdown("# 章 <span>內</span>\n", NoTargets())
+    assert result.title == "章 <span>內</span>"
+    assert "".join(parse(result.body).itertext()).strip() == result.title
 
 
 def test_title_is_empty_without_an_h1():
@@ -99,6 +109,11 @@ def test_raw_html_blocks_and_inline_tags_are_escaped_into_visible_text():
 def test_raw_html_gives_one_warning_per_file_with_line_numbers():
     text = "---\nt: x\n---\n# 章\n\n<div>\n</div>\n\n文 <b>粗</b>\n第二行 <i>斜</i>\n"
     assert render_markdown(text, NoTargets()).warnings == ("原始 HTML 已轉義成純文字（第 6、9、10 行）",)
+
+
+def test_raw_html_inside_image_alt_text_is_warned_about_too():
+    result = render_markdown("# 章\n\n![圖 <b>x</b>](a.png)\n", NoTargets())
+    assert result.warnings == ("原始 HTML 已轉義成純文字（第 3 行）",)
 
 
 def test_plain_markdown_has_no_warnings():
@@ -212,6 +227,8 @@ def test_quotes_lists_and_horizontal_rules_follow_commonmark():
     ("小\n﹐字\n", "小﹐字"),           # 小寫變體
     ("か\n\U0001b001\n", "か\U0001b001"),     # 假名補充
     ("中&#x6587;\n字\n", "中文字"),              # 字元參照仍是文字
+    ("中文\n“**引號**”\n", "中文“引號”"),           # 共用標點與中文字分屬不同 token
+    ("他說“**好。**”\n“走吧”\n", "他說“好。”“走吧”"),
 ])
 def test_punctuation_shared_with_western_text_joins_when_it_sits_in_cjk_text(markdown, expected):
     assert paragraph_text(markdown) == expected
@@ -221,6 +238,7 @@ def test_punctuation_shared_with_western_text_joins_when_it_sits_in_cjk_text(mar
     "He said “hi”\n“there”\n",
     "wait…\n…then\n",
     "“”\n“”\n",
+    "He said “**hi**”\n“there”\n",
 ])
 def test_punctuation_shared_with_western_text_keeps_whitespace_in_western_text(markdown):
     assert "\n" in paragraph_text(markdown)
@@ -270,15 +288,15 @@ def test_a_heading_with_nothing_left_for_an_anchor_gets_no_id():
 # --- 連結 ------------------------------------------------------------------------
 
 class Targets:
-    """假的目標解析器：只認得給定的連結，並記下被問過哪些目標。"""
+    """假的目標解析器：只認得給定的（路徑, 錨點），並記下被問過哪些目標。"""
 
     def __init__(self, links):
         self.links = links
         self.asked = []
 
-    def link(self, target):
-        self.asked.append(target)
-        return self.links.get(target)
+    def link(self, path, fragment):
+        self.asked.append((path, fragment))
+        return self.links.get((path, fragment))
 
     def image(self, target):
         return None
@@ -289,20 +307,28 @@ def links(body: str) -> list:
 
 
 def test_local_links_are_replaced_by_what_the_resolver_returns():
-    targets = Targets({"02.md": "chapter-0002.xhtml", "02.md#某標題": "chapter-0002.xhtml#某標題",
-                       "#本章": "#本章", "../第一部/01.md": "chapter-0001.xhtml"})
+    targets = Targets({("02.md", ""): "chapter-0002.xhtml", ("02.md", "某標題"): "chapter-0002.xhtml#某標題",
+                       ("", "本章"): "#本章", ("../第一部/01.md", ""): "chapter-0001.xhtml"})
     result = render_markdown(
         "[見第二章](02.md)、[標題](02.md#某標題)、[本章](#本章)、[跨部](../第一部/01.md)\n", targets)
     assert links(result.body) == [("見第二章", "chapter-0002.xhtml"), ("標題", "chapter-0002.xhtml#某標題"),
                                   ("本章", "#本章"), ("跨部", "chapter-0001.xhtml")]
-    assert targets.asked == ["02.md", "02.md#某標題", "#本章", "../第一部/01.md"]
+    assert targets.asked == [("02.md", ""), ("02.md", "某標題"), ("", "本章"), ("../第一部/01.md", "")]
     assert result.warnings == ()
 
 
 def test_targets_are_given_to_the_resolver_decoded():
-    targets = Targets({"第 2 章.md#a b": "chapter-0002.xhtml#a"})
+    targets = Targets({("第 2 章.md", "a b"): "chapter-0002.xhtml#a"})
     result = render_markdown("[x](<第 2 章.md#a b>) [y](%E7%AC%AC%202%20%E7%AB%A0.md#a%20b)\n", targets)
     assert [href for _, href in links(result.body)] == ["chapter-0002.xhtml#a", "chapter-0002.xhtml#a"]
+
+
+def test_an_encoded_hash_belongs_to_the_file_name_not_the_anchor():
+    targets = Targets({("C#.md", ""): "chapter-0002.xhtml", ("C#.md", "a#b"): "chapter-0002.xhtml#ab"})
+    result = render_markdown("[C#](C%23.md) [錨](C%23.md#a%23b) [錯](C#.md)\n", targets)
+    assert targets.asked == [("C#.md", ""), ("C#.md", "a#b"), ("C", ".md")]
+    assert [href for _, href in links(result.body)] == ["chapter-0002.xhtml", "chapter-0002.xhtml#ab"]
+    assert result.warnings == ("失效的連結已改成純文字：C#.md（第 1 行）",)
 
 
 def test_unresolved_links_become_their_text_with_a_warning_each():
@@ -316,8 +342,8 @@ def test_unresolved_links_become_their_text_with_a_warning_each():
 
 
 class Refuses:
-    def link(self, target):
-        raise AssertionError(f"外部連結不該交給解析器：{target}")
+    def link(self, path, fragment):
+        raise AssertionError(f"外部連結不該交給解析器：{path}#{fragment}")
 
     def image(self, target):
         return None
@@ -345,7 +371,7 @@ class Images:
         self.images = images
         self.asked = []
 
-    def link(self, target):
+    def link(self, path, fragment):
         return None
 
     def image(self, target):
@@ -381,7 +407,7 @@ def test_an_illustration_the_resolver_skips_shows_its_alt_text_without_a_warning
 ])
 def test_web_and_unsupported_illustrations_show_alt_text_with_a_warning(markdown, warning):
     class Refuses:
-        def link(self, target):
+        def link(self, path, fragment):
             return None
 
         def image(self, target):
@@ -395,3 +421,19 @@ def test_web_and_unsupported_illustrations_show_alt_text_with_a_warning(markdown
 def test_an_empty_alt_text_falls_back_to_the_file_name():
     assert paragraph_text("前![](https://example.com/dir/photo.png?x=1)後\n") == "前photo.png後"
     assert paragraph_text("前![](images/%E5%9C%96.svg)後\n") == "前圖.svg後"
+
+
+# --- XHTML 合法性 ----------------------------------------------------------------
+
+@pytest.mark.parametrize("char", ["\x00", "\x01", "\x08", "\x0b", "\x0c", "\x0e", "\x1f", "\ufffe", "\uffff"])
+def test_characters_xml_forbids_are_replaced_so_the_xhtml_still_parses(char):
+    result = render_markdown(f"# 標{char}題\n\nhello {char} world\n\n`碼{char}`\n", NoTargets())
+    root = parse(result.body)  # 解析失敗即代表不是格式正確的 XHTML
+    assert char not in result.body and char not in result.title
+    assert "hello \ufffd world" in "".join(root.itertext())
+    assert result.title == "標\ufffd題"
+
+
+def test_tabs_and_line_breaks_are_kept():
+    root = parse(render_markdown("```\na\tb\r\nc\n```\n", NoTargets()).body)
+    assert root.find(f"{X}pre/{X}code").text == "a\tb\nc\n"

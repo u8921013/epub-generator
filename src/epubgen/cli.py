@@ -74,7 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--skip-broken", action="store_true",
-        help="跳過無法讀取的圖片並在結束時列出（預設：遇到損毀圖片就報錯）",
+        help="跳過找不到或損毀的圖片並在結束時列出（預設：遇到這類圖片就報錯）",
     )
     parser.add_argument(
         "--title", metavar="TITLE",
@@ -87,7 +87,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--cover", metavar="IMAGE",
-        help="指定封面圖片，可以在輸入資料夾內或外；相對路徑從目前目錄算起（預設：第一頁）",
+        help=("指定封面圖片，可以在輸入資料夾內或外；相對路徑從目前目錄算起"
+              "（漫畫書預設：第一頁；文字書預設：無封面）"),
     )
     parser.add_argument(
         "--keep-webp", action="store_true",

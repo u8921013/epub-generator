@@ -12,7 +12,7 @@ from .epub import (DIRECTIONS, BookSpec, TextBookSpec, TextChapter, TocEntry, ch
                    write_epub, write_text_epub)
 from .errors import BrokenImageError, EpubgenError
 from .layout import page_viewports
-from .images import ImageSettings, PageImage, cover_as_jpeg, load_image
+from .images import ImageSettings, PageImage, kobo_safe_cover, load_image
 from .metadata import is_valid_language, safe_file_name
 from .illustrations import Illustrations
 from .targets import BookTargets, LinkedChapter
@@ -34,13 +34,13 @@ class BookKind(enum.Enum):
 class BuildOptions:
     output: Path | None = None  # 預設：輸入資料夾旁邊的 <書名>.epub
     force: bool = False  # 輸出檔已存在時是否覆蓋
-    skip_broken: bool = False  # 跳過損毀的圖片，而不是報錯
+    skip_broken: bool = False  # 跳過找不到或損毀的圖片，而不是報錯
     direction: str | None = None  # 翻頁方向，"rtl" 或 "ltr"；None 表示未指定，依書的種類套用預設（漫畫書 rtl）
     spread: bool = False  # 雙頁模式
     title: str | None = None  # 預設：輸入資料夾名稱
     author: str | None = None
     language: str = DEFAULT_LANGUAGE
-    cover: Path | None = None  # 預設：第一頁
+    cover: Path | None = None  # 漫畫書預設：第一頁；文字書預設：無封面
     keep_webp: bool = False  # 預設把 WebP 轉成 JPEG；True 則保留原檔
     quality: int | None = None  # 重新壓縮的 JPEG 品質（1–100）；預設不重新壓縮
     max_size: int | None = None  # 長邊的像素上限；預設不縮放
@@ -123,11 +123,12 @@ def _build_text_book(input_dir: Path, folder: Path, title: str, destination: Pat
     non_empty = [chapter for chapter in sources if not chapter.first_pass.is_empty]
     if not non_empty:
         raise EpubgenError(f"資料夾裡沒有任何有內容的章：{input_dir}")
-    # 章的編號與 write_text_epub 相同：依閱讀順序、只算有內容的章。
+    # 章的檔名在這裡決定一次（依閱讀順序、只算有內容的章），書內連結與寫出 EPUB 都用它。
+    file_names = {chapter.source: chapter_file_name(i) for i, chapter in enumerate(non_empty, start=1)}
     illustrations = Illustrations(settings, options.skip_broken)
     targets = BookTargets({
-        chapter.source.resolve(): LinkedChapter(chapter_file_name(i), frozenset(chapter.first_pass.anchors))
-        for i, chapter in enumerate(non_empty, start=1)
+        chapter.source.resolve(): LinkedChapter(file_names[chapter.source], frozenset(chapter.first_pass.anchors))
+        for chapter in non_empty
     }, illustrations)
 
     chapters = []
@@ -138,7 +139,8 @@ def _build_text_book(input_dir: Path, folder: Path, title: str, destination: Pat
             continue
         rendered = render_markdown(chapter.text, targets.for_chapter(chapter.source, chapter.name))
         warnings.extend(f"{chapter.name}：{reason}" for reason in rendered.warnings)
-        chapters.append(TextChapter(title=rendered.title or chapter.source.stem, body=rendered.body, part=chapter.part))
+        chapters.append(TextChapter(title=rendered.title or chapter.source.stem, body=rendered.body,
+                                    file_name=file_names[chapter.source], part=chapter.part))
     book = TextBookSpec(title=title, language=options.language, chapters=tuple(chapters),
                         author=options.author, illustrations=tuple(illustrations.images),
                         cover=cover)
@@ -188,9 +190,8 @@ def _resolve_cover(cover: Path | None, loaded: "_LoadedPages", settings: ImageSe
     """
     page, external = _pick_cover(cover, loaded, settings)
     chosen = external or loaded.pages[page - 1]
-    if chosen.extension == ".gif":
-        external = cover_as_jpeg(chosen, settings.quality)
-    return page, external
+    safe = kobo_safe_cover(chosen, settings.quality)
+    return page, (external if safe is chosen else safe)
 
 
 def _pick_cover(cover: Path | None, loaded: "_LoadedPages", settings: ImageSettings):
@@ -225,8 +226,7 @@ def _text_book_cover(cover: Path | None, settings: ImageSettings) -> PageImage |
     """文字書的封面圖。GIF 跟漫畫書一樣另外轉成 JPEG，因為 Kobo 不支援 GIF 封面。"""
     if cover is None:
         return None
-    image = _load_cover(_checked_cover_path(cover), settings)
-    return cover_as_jpeg(image, settings.quality) if image.extension == ".gif" else image
+    return kobo_safe_cover(_load_cover(_checked_cover_path(cover), settings), settings.quality)
 
 
 @dataclass
